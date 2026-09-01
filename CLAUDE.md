@@ -33,22 +33,23 @@ dotnet csharpier format .    # then: dotnet csharpier check .
 pnpm exec prettier --write . # then: pnpm exec prettier --check .
 ```
 
-Single test — the test project runs on Microsoft Testing Platform, not VSTest, so filters go after
-`--` and use MTP syntax (`--filter-class`, `--filter-method`, `--filter-query`):
+Single test — the test projects run on Microsoft Testing Platform, not VSTest, so filters go after
+`--` and use MTP syntax (`--filter-class`, `--filter-method`, `--filter-query`). Always scope the run
+to the csproj that owns the test:
 
 ```bash
-dotnet test --no-build -- --filter-method "*RandomInt*"
+dotnet test --no-build test/Kongroo.OpcUa.UnitTests/Kongroo.OpcUa.UnitTests.csproj -- --filter-method "*TemperatureAt*"
 ```
 
 A filter that matches nothing exits **8** ("Zero tests ran"), not 0 — a typo'd filter looks like a
-failure, not a pass. That includes a solution-wide run: `dotnet test --no-build -- --filter-method
-"*ClampSetpoint*"` runs both test projects, and the integration project (which has no matching test)
-reports "Zero tests ran" and drags the whole run to exit 8, even though the unit project passed.
-Scope the filter to the one project's csproj instead:
+failure, not a pass. That is also why the run above is scoped: solution-wide, `dotnet test --no-build
+-- --filter-method "*TemperatureAt*"` runs both test projects, and the integration project (which has
+no matching test) reports "Zero tests ran" and drags the whole run to exit 8 even though the unit
+project passed.
 
-```bash
-dotnet test --no-build test/Kongroo.OpcUa.UnitTests/Kongroo.OpcUa.UnitTests.csproj -- --filter-method "*ClampSetpoint*"
-```
+Do not add `--nologo` to `dotnet test`: the SDK forwards it to each MTP module, which rejects the
+unknown option and exits **5** while `dotnet test` only prints "Zero tests ran" — it reads exactly
+like a broken test project.
 
 ## Build conventions that bite
 
