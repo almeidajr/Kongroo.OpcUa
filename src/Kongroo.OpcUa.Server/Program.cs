@@ -1,5 +1,7 @@
 using System.Globalization;
 using Kongroo.OpcUa.Server;
+using Opc.Ua;
+using Opc.Ua.Server.Hosting;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
@@ -31,7 +33,38 @@ builder
     );
 
 builder.Services.AddSingleton(TimeProvider.System);
-builder.Services.AddHostedService<SampleWorker>();
+
+const string applicationName = "KongrooOpcUaServer";
+var port = int.TryParse(builder.Configuration["OpcUa:Port"], out var configuredPort) ? configuredPort : 62552;
+
+builder
+    .Services.AddOpcUa()
+    .AddServer(options =>
+    {
+        options.ApplicationName = applicationName;
+        options.ApplicationUri = $"urn:localhost:{applicationName}";
+        options.ProductUri = "uri:kongroo.dev:KongrooOpcUaServer";
+        options.SubjectName = $"CN={applicationName}, DC=localhost";
+        // Security defaults are already correct: Sign&Encrypt on, None
+        // off, SHA-1 rejected. Never add AutoAcceptUntrustedCertificates
+        // or IncludeUnsecurePolicyNone here for convenience.
+        options.RejectSHA1Certificates = true;
+        options.MinCertificateKeySize = 2048;
+        options.IncludeSignAndEncryptPolicies = true;
+        options.IncludeUnsecurePolicyNone = false;
+        options.UserTokenPolicies.Add(new OpcUaUserTokenPolicy { TokenType = UserTokenType.Anonymous });
+        options.EndpointUrls.Add($"opc.tcp://localhost:{port}/{applicationName}");
+    })
+    .AddDefaultIdentityAuthenticators(options =>
+    {
+        // AddServer does NOT auto-wire identity options; without this call
+        // authentication is silently absent.
+        options.EnableAnonymous = true;
+        options.EnableUserNamePassword = false;
+        options.EnableX509 = false;
+        options.EnableJwt = false;
+    })
+    .AddNodeManager<PlantNodeManagerFactory>();
 
 var host = builder.Build();
 
