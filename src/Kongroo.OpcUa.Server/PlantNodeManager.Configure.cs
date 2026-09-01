@@ -42,6 +42,10 @@ public sealed partial class PlantNodeManager
         // initializer cannot reference an instance field (CS0236).
         // Configure runs once at startup before any client exists, so a
         // plain assignment is safe; every later mutation is atomic.
+        // Must stay the FIRST statement: PollEvery primes the node by
+        // invoking the sample lambda synchronously at wiring time, so an
+        // epoch stamped after the wiring block would prime the node from
+        // EpochTicks = 0 — a first sample dated year 1.
         _state = _state with
         {
             EpochTicks = _timeProvider.GetUtcNow().UtcTicks,
@@ -59,10 +63,17 @@ public sealed partial class PlantNodeManager
             .Historize();
 
         // OnRead and OnWrite are distinct operations, so they coexist.
+        // OnRead is load-bearing here, not a convenience: once the write
+        // handler returns Good the stack commits the client's RAW written
+        // value into the node's cached Value, so without OnRead a client
+        // reads back its own unclamped number instead of the clamp.
         builder.Plant.Setpoint.OnRead(() => _state.Setpoint).OnWrite(requested => ApplySetpoint(requested));
 
         // Returns the accepted value so a client can observe the clamp
-        // without reading the variable back.
+        // without reading the variable back. The block lambda is not
+        // redundant: IDE0200/IDE0350 demand the method group
+        // OnCall(ApplySetpoint), and Sonar S3241 then flags ApplySetpoint's
+        // return value as unused. This shape satisfies both, no suppression.
         builder.Plant.SetSetpoint.OnCall(requested =>
         {
             var accepted = ApplySetpoint(requested);
@@ -88,6 +99,14 @@ public sealed partial class PlantNodeManager
             static (state, setpoint) => state with { Setpoint = setpoint },
             accepted
         );
+
+        // ponytail: the CAS above and the TryWrite below are two separate
+        // atomic steps, so concurrent writers can publish events in an order
+        // that differs from the final state — A(30) and B(40) may CAS A then B
+        // yet queue B then A, leaving the last event saying 30 while Setpoint
+        // reads 40. Accepted ceiling: every event is individually true and
+        // clients read current values from the variable. Serialize the two
+        // steps only if event order ever has to match state order.
 
         // Deliberately fire-and-forget: with DropOldest a full channel never
         // blocks or rejects this write, it evicts the oldest queued value
