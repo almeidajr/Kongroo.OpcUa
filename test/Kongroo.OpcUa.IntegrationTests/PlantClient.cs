@@ -1,15 +1,20 @@
+using System.Runtime.CompilerServices;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Opc.Ua;
 using Opc.Ua.Client;
+// A namespace alias rather than a using directive: the generated model
+// namespace declares its own ObjectIds, which would make every unqualified
+// ObjectIds below ambiguous with Opc.Ua's.
+using PlantModel = Kongroo.OpcUa.Server;
 
 namespace Kongroo.OpcUa.IntegrationTests;
 
 /// <summary>
 /// A real OPC UA client session against the plant server, reduced to the
-/// four operations the integration tests need: browse, read, write and
-/// call.
+/// five operations the integration tests need: browse, read, write, call and
+/// subscribe to events.
 /// </summary>
 /// <remarks>
 /// Every node is addressed by browse path from the Objects folder rather
@@ -155,6 +160,54 @@ internal sealed class PlantClient : IAsyncDisposable
     }
 
     /// <summary>
+    /// Streams one record per <c>SetpointChangedEventType</c> reported by the
+    /// Plant object. The event monitored item is created when enumeration
+    /// starts and removed when the enumerator is disposed, so the server's
+    /// event source activates and tears down with this stream.
+    /// </summary>
+    /// <remarks>
+    /// A private decoder registry rather than
+    /// <see cref="EventRecordDecoderRegistry.Default"/>: the composed field
+    /// layout drives both the filter's select clauses and the positional
+    /// decode, so registering only this model's decoders keeps the two in step
+    /// and leaves no process-wide state behind.
+    /// </remarks>
+    public async IAsyncEnumerable<PlantModel.SetpointChangedEventTypeRecord> SubscribeSetpointChangesAsync(
+        [EnumeratorCancellation] CancellationToken cancellationToken = default
+    )
+    {
+        var plantNodeId = await ResolveAsync([PlantBrowseName], cancellationToken);
+        // The session's own table, not MessageContext's: only the former is
+        // populated with the server's namespaces, and both the filter's type id
+        // and the decoder registration are looked up by URI.
+        var namespaceUris = _session.NamespaceUris;
+        var registry = PlantModel.PlantEventRecordDecoders.RegisterPlantDecoders(
+            new EventRecordDecoderRegistry(),
+            namespaceUris
+        );
+        var filter = PlantModel.SetpointChangedEventTypeRecord.EventFilters.Build(namespaceUris, registry);
+
+        var notifications = _session.DefaultStreaming.SubscribeEventsAsync(
+            plantNodeId,
+            filter,
+            options: null,
+            cancellationToken
+        );
+
+        await foreach (var notification in notifications)
+        {
+            // ArrayOf<T> enumerates through a ReadOnlySpan enumerator, which an
+            // async method may not hold, so materialize before decoding.
+            var fields = notification.Fields.ToArray() ?? [];
+
+            if (registry.Decode(fields) is PlantModel.SetpointChangedEventTypeRecord change)
+            {
+                yield return change;
+            }
+        }
+    }
+
+    /// <summary>
     /// Closes the session, stops the client host and removes the ephemeral
     /// certificate store.
     /// </summary>
@@ -190,6 +243,16 @@ internal sealed class PlantClient : IAsyncDisposable
                 options.DiscoveryUrl = endpointUrl;
                 options.SecurityMode = MessageSecurityMode.SignAndEncrypt;
                 options.SecurityPolicyUri = SecurityPolicies.Basic256Sha256;
+            })
+            // Registers the v2 subscription manager that ManagedSession's
+            // DefaultStreaming needs; without it the property throws. The
+            // publishing interval bounds how long an event waits for its
+            // publish cycle, so keep it short enough not to pad a test.
+            .AddSubscriptions(options =>
+            {
+                options.PublishingInterval = TimeSpan.FromMilliseconds(100.0);
+                options.KeepAliveCount = 10;
+                options.LifetimeCount = 100;
             });
 
         return builder.Build();
