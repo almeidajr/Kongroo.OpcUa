@@ -26,6 +26,13 @@
     <PackageVersion Include="Serilog.Sinks.Console" Version="6.1.1" />
   </ItemGroup>
 
+  <ItemGroup Label="OPC UA">
+    <PackageVersion Include="OPCFoundation.NetStandard.Opc.Ua.Server" Version="2.0.0-preview.3" />
+    <PackageVersion Include="OPCFoundation.NetStandard.Opc.Ua.Configuration" Version="2.0.0-preview.3" />
+    <PackageVersion Include="OPCFoundation.NetStandard.Opc.Ua.SourceGeneration" Version="2.0.0-preview.3" />
+    <PackageVersion Include="OPCFoundation.NetStandard.Opc.Ua.Client" Version="2.0.0-preview.3" />
+  </ItemGroup>
+
   <ItemGroup Label="OpenTelemetry">
     <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.18.0" />
     <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.18.0" />
