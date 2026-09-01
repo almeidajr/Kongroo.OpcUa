@@ -1,0 +1,58 @@
+name: release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  id-token: write
+  contents: write # create the GitHub Release
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: release # secret scoping + optional approval gate
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # MinVer derives the version from git tags
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+      - id: pack
+        run: |
+          # IsPackable is false repo-wide, so a repo with no packable project packs nothing;
+          # NuGet/login and the push below both need to be skipped in that case, or the login
+          # fails outright (no NUGET_USER / trusted-publishing policy in a non-publishing repo).
+          dotnet pack -c Release -o "${{ runner.temp }}/pkg"
+          shopt -s nullglob
+          packages=("${{ runner.temp }}"/pkg/*.nupkg)
+          echo "count=${#packages[@]}" >> "$GITHUB_OUTPUT"
+      - uses: NuGet/login@v1
+        if: steps.pack.outputs.count != '0'
+        id: login
+        with:
+          user: ${{ secrets.NUGET_USER }} # nuget.org profile name, NOT email
+      - name: Push packages
+        if: steps.pack.outputs.count != '0'
+        run: |
+          dotnet nuget push "${{ runner.temp }}/pkg/*.nupkg" \
+            --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          prev=$(git describe --tags --abbrev=0 "$GITHUB_REF_NAME^" 2>/dev/null || true)
+          if [ -n "$prev" ]; then range="$prev..$GITHUB_REF_NAME"; else range="$GITHUB_REF_NAME"; fi
+          {
+            echo "## What's Changed"
+            git log --no-merges --pretty='* %s (%h)' "$range"
+            if [ -n "$prev" ]; then
+              echo
+              echo "**Full Changelog**: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/$prev...$GITHUB_REF_NAME"
+            fi
+          } > "$RUNNER_TEMP/notes.md"
+          flags=(--verify-tag --title "Kongroo.OpcUa $version" --notes-file "$RUNNER_TEMP/notes.md")
+          case "$version" in *-*) flags+=(--prerelease) ;; esac
+          gh release create "$GITHUB_REF_NAME" "${flags[@]}"

@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Kongroo.OpcUa.Server/Kongroo.OpcUa.Server.csproj" />
+  </Folder>
+  <Folder Name="/test/">
+    <Project Path="test/Kongroo.OpcUa.UnitTests/Kongroo.OpcUa.UnitTests.csproj" />
+  </Folder>
+</Solution>
