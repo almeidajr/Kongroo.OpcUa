@@ -11,5 +11,28 @@
     <PackageReference Include="OpenTelemetry.Extensions.Hosting" />
     <PackageReference Include="OpenTelemetry.Instrumentation.Http" />
     <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" />
+    <PackageReference Include="OPCFoundation.NetStandard.Opc.Ua.Server" />
+    <PackageReference Include="OPCFoundation.NetStandard.Opc.Ua.Configuration" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference
+      Include="OPCFoundation.NetStandard.Opc.Ua.SourceGeneration"
+      OutputItemType="Analyzer"
+      ReferenceOutputAssembly="false"
+    />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AdditionalFiles Include="Model\Plant.xml">
+      <ModelSourceGeneratorModelUri>http://kongroo.dev/UA/Plant/</ModelSourceGeneratorModelUri>
+      <ModelSourceGeneratorName>Plant</ModelSourceGeneratorName>
+      <ModelSourceGeneratorPrefix>Kongroo.OpcUa.Server</ModelSourceGeneratorPrefix>
+    </AdditionalFiles>
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Kongroo.OpcUa.UnitTests" />
+    <InternalsVisibleTo Include="Kongroo.OpcUa.IntegrationTests" />
   </ItemGroup>
 </Project>
