@@ -3,6 +3,7 @@
     <Project Path="src/Kongroo.OpcUa.Server/Kongroo.OpcUa.Server.csproj" />
   </Folder>
   <Folder Name="/test/">
+    <Project Path="test/Kongroo.OpcUa.IntegrationTests/Kongroo.OpcUa.IntegrationTests.csproj" />
     <Project Path="test/Kongroo.OpcUa.UnitTests/Kongroo.OpcUa.UnitTests.csproj" />
   </Folder>
 </Solution>
