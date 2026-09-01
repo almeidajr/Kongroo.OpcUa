@@ -11,5 +11,6 @@ RUN dotnet publish src/Kongroo.OpcUa.Server/Kongroo.OpcUa.Server.csproj \
 FROM mcr.microsoft.com/dotnet/runtime:10.0 AS final
 WORKDIR /app
 COPY --from=build /app .
+EXPOSE 62552
 USER $APP_UID
 ENTRYPOINT ["dotnet", "Kongroo.OpcUa.Server.dll"]
