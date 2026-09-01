@@ -1,5 +1,7 @@
 using System.Collections.Immutable;
+using System.Runtime.CompilerServices;
 using System.Threading.Channels;
+using Opc.Ua;
 using Opc.Ua.Server.Fluent;
 
 namespace Kongroo.OpcUa.Server;
@@ -66,6 +68,11 @@ public sealed partial class PlantNodeManager
             var accepted = ApplySetpoint(requested);
             return accepted;
         });
+
+        // Starts lazily on the first event subscriber and cancels on the
+        // last, which is why the source is a long-lived channel rather
+        // than per-subscription state.
+        builder.Plant.Publish(SetpointChangesAsync);
     }
 
     /// <summary>
@@ -87,5 +94,24 @@ public sealed partial class PlantNodeManager
         _setpointChanges.Writer.TryWrite(accepted);
 
         return accepted;
+    }
+
+    /// <summary>
+    /// Streams one <c>SetpointChangedEventType</c> per accepted setpoint.
+    /// The event registry populates EventId, EventType, SourceNode,
+    /// SourceName, Time and ReceiveTime, so only NewSetpoint is set here.
+    /// </summary>
+    private async IAsyncEnumerable<SetpointChangedEventState> SetpointChangesAsync(
+        BaseObjectState notifier,
+        ISystemContext context,
+        [EnumeratorCancellation] CancellationToken cancellationToken
+    )
+    {
+        await foreach (var setpoint in _setpointChanges.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+        {
+            var change = new SetpointChangedEventState(parent: notifier);
+            change.NewSetpoint = PropertyState<double>.With<VariantBuilder>(change, setpoint);
+            yield return change;
+        }
     }
 }
