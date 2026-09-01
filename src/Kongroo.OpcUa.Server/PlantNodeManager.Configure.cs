@@ -89,8 +89,9 @@ public sealed partial class PlantNodeManager
             accepted
         );
 
-        // Deliberately fire-and-forget: DropOldest means TryWrite only
-        // fails if no reader has ever drained, which must not fail a write.
+        // Deliberately fire-and-forget: with DropOldest a full channel never
+        // blocks or rejects this write, it evicts the oldest queued value
+        // instead, so a slow or absent event consumer can never fail it.
         _setpointChanges.Writer.TryWrite(accepted);
 
         return accepted;
@@ -107,6 +108,14 @@ public sealed partial class PlantNodeManager
         [EnumeratorCancellation] CancellationToken cancellationToken
     )
     {
+        // Discard anything buffered while no client was subscribed. An OPC UA event
+        // subscription delivers changes that occur after it starts; replaying a stale
+        // backlog would stamp old changes with a current Time/ReceiveTime.
+        while (_setpointChanges.Reader.TryRead(out _))
+        {
+            // Intentionally empty: draining for its side effect.
+        }
+
         await foreach (var setpoint in _setpointChanges.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
         {
             var change = new SetpointChangedEventState(parent: notifier);
