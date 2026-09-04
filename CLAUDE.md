@@ -77,6 +77,17 @@ Everything below is enforced; ignoring it means a red build or red CI, not a sty
   the collision. Anyone adding a model type must check the generated name.
 - **`SupportsEvents="true"` belongs on the `<opc:Object>` instance, not the ObjectType** — the
   generator gates the typed `Publish<TEvent>` accessor on the instance.
+- **Server settings bind through the Options pattern, and `AddServer`'s callback cannot see DI.**
+  `PlantServerOptions` (section `OpcUa`) is bound with `.ValidateDataAnnotations().ValidateOnStart()`,
+  so a malformed port refuses to boot instead of silently falling back. Because
+  `AddServer(Action<OpcUaServerOptions>)` gets no service provider, anything derived from
+  configuration is applied in a second `AddOptions<OpcUaServerOptions>().Configure<IOptions<…>>(…)`
+  after it — `Configure` actions run in registration order. `ValidateDataAnnotations` needs the
+  `Microsoft.Extensions.Options.DataAnnotations` package; it is not in the `Hosting` graph.
+- **`PkiRoot` is pinned to `%LOCALAPPDATA%/Kongroo/OpcUaServer/pki`**, not the stack's default
+  `%TEMP%/OPC Foundation/{App}/pki`. `%TEMP%` is routinely cleared, and a server that loses its
+  certificate store regenerates its identity on the next boot, forcing every client to re-trust it.
+  It is set in `Program.cs`, deliberately not configurable.
 - **`AddServer` boots the server inside a `BackgroundService`, so `host.StartAsync()` returns before
   any endpoint listener is bound.** Anything that connects immediately after `StartAsync` — an
   in-process test, a tool — will fail. Register an `IServerStartupTask` and await it; the stack
@@ -119,12 +130,15 @@ here; this section records only what is specific to this repo.
   `List<T>` or arrays, and public fields do not compile.
 - **Domain short forms that count as words here:** `NodeId`, `OpcUa`, on top of the usual `Id`,
   `Uri`, `Json`.
-- **`TimeProvider` is registered as a singleton** in `Program.cs`, but nothing resolves it from DI —
-  `PlantNodeManager` is not DI-activated (only its generated factory is), so it holds a plain
-  `TimeProvider.System` field instead (see the `ponytail:` comment in
-  `PlantNodeManager.Configure.cs`). Using `FakeTimeProvider` in a test still needs
-  `Microsoft.Extensions.TimeProvider.Testing` added to `Directory.Packages.props` first — it was
-  trimmed out, nothing uses it yet.
+- **`TimeProvider` is registered as a singleton** in `Program.cs` and the stack's
+  `OpcUaServerHostedService` resolves it from DI — so the registration is load-bearing, not dead.
+  (The stack only `TryAddSingleton`s its own default inside `RegisterJwtIssuer`, which is gated on
+  a JWKS URI and never runs here; the hosted service otherwise falls back to its
+  `TimeProvider? = null` parameter default.) What is _not_ DI-activated is `PlantNodeManager`
+  itself — only its generated factory is — so it holds a plain `TimeProvider.System` field instead
+  (see the `ponytail:` comment in `PlantNodeManager.Configure.cs`). Using `FakeTimeProvider` in a
+  test still needs `Microsoft.Extensions.TimeProvider.Testing` added to `Directory.Packages.props`
+  first — it was trimmed out, nothing uses it yet.
 - **The `building-opcua-servers` skill's worked examples use `ct`, `s`, `v` in lambdas and `m_` on
   fields.** Follow the skill's shape, not its identifiers: `.editorconfig` enforces `_camelCase`
   private fields (IDE1006 + warnings-as-errors), so `m_state` **does not compile** here.
