@@ -68,7 +68,15 @@ internal static class PlantAuthorization
         [RolePermissionFor(node, Role.Observer), RolePermissionFor(node, Role.Operator)];
 
     private static RolePermissionType RolePermissionFor(PlantNode node, Role role) =>
-        new() { RoleId = ExpandedNodeId.ToNodeId(role.RoleId, null!), Permissions = (uint)PermissionsFor(node, role) };
+        new()
+        {
+            // null! rather than a NamespaceTable: the parameter is declared non-nullable upstream,
+            // but a well-known role id is ns=0 with an empty NamespaceUri, so ToNodeId returns at
+            // its early path without ever reading the table (and null-checks it even after that).
+            // Passing a real table would imply it participates in the conversion; it does not.
+            RoleId = ExpandedNodeId.ToNodeId(role.RoleId, null!),
+            Permissions = (uint)PermissionsFor(node, role),
+        };
 
     private static PermissionType ObserverPermissionsFor(PlantNode node) =>
         node switch
