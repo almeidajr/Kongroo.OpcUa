@@ -64,7 +64,7 @@ internal enum PlantRole
 /// One user seeded into the in-memory user store at startup.
 /// </summary>
 /// <remarks>
-/// These are validated by <c>PlantUsers.CreateUserDatabase</c>, not by data annotations:
+/// These are validated by <see cref="PlantUsers.CreateUserDatabase"/>, not by data annotations:
 /// <c>ValidateDataAnnotations</c> inspects only the top-level properties of an options object and
 /// does not recurse into collection items, so attributes here would never run.
 /// </remarks>
@@ -81,4 +81,13 @@ internal sealed record PlantUserOptions
 
     /// <summary>Role this user is granted.</summary>
     public PlantRole Role { get; init; }
+
+    /// <summary>Renders the user without its password.</summary>
+    /// <returns>The user name and role. Never the password.</returns>
+    /// <remarks>
+    /// Overridden because a record's synthesized <c>ToString</c> prints every property: a single
+    /// <c>logger.LogDebug("{User}", user)</c> anywhere downstream would otherwise put a clear-text
+    /// password in the logs, and this type is constructed from real credentials.
+    /// </remarks>
+    public override string ToString() => $"{Name} ({Role})";
 }
