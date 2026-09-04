@@ -10,9 +10,14 @@ internal static class TestPkiRoot
     private static readonly string Root = Path.Combine(Path.GetTempPath(), "KongrooOpcUaTests");
 
     /// <summary>
-    /// Returns a directory path unique to the caller. The stack creates the
-    /// directory itself when it writes the application certificate.
+    /// Reserves a store path unique to the caller. Nothing is written to disk
+    /// here; the stack creates the directory when it writes the application
+    /// certificate, so a path that is never used leaves nothing behind.
     /// </summary>
+    /// <returns>
+    /// An absolute path below the temporary directory, suitable for
+    /// <c>PkiRoot</c> and for <see cref="Delete"/>.
+    /// </returns>
     internal static string Create() => Path.Combine(Root, Guid.NewGuid().ToString("N"));
 
     /// <summary>
@@ -21,6 +26,10 @@ internal static class TestPkiRoot
     /// a session tears down, and a leftover temporary directory must never
     /// fail a test run.
     /// </summary>
+    /// <param name="pkiRoot">
+    /// A path from <see cref="Create"/>. A path that was never used, or was
+    /// already removed, is ignored.
+    /// </param>
     internal static void Delete(string pkiRoot)
     {
         if (!Directory.Exists(pkiRoot))

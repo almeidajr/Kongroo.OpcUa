@@ -11,9 +11,9 @@ namespace Kongroo.OpcUa.Server;
 internal sealed record PlantSimulationState(double Setpoint, long EpochTicks);
 
 /// <summary>
-/// Pure simulation logic. Time arrives as a parameter rather than being
-/// read from a clock, which is what makes every function here testable
-/// with no fake and no ceremony.
+/// Pure simulation logic for the Plant node manager. Time arrives as a
+/// parameter rather than being read from a clock, so every function here is
+/// deterministic and testable without a fake.
 /// </summary>
 internal static class PlantSimulation
 {
@@ -35,6 +35,15 @@ internal static class PlantSimulation
     /// client sees motion immediately and history accumulates a visible
     /// waveform.
     /// </summary>
+    /// <param name="state">
+    /// Setpoint to oscillate around and the epoch elapsed time is measured
+    /// from.
+    /// </param>
+    /// <param name="nowUtc">
+    /// The instant to sample. Times before the epoch are valid and simply
+    /// sample the waveform backwards.
+    /// </param>
+    /// <returns>Temperature in degrees Celsius.</returns>
     internal static double TemperatureAt(PlantSimulationState state, DateTimeOffset nowUtc)
     {
         var elapsedSeconds = (nowUtc.UtcTicks - state.EpochTicks) / (double)TimeSpan.TicksPerSecond;
@@ -50,6 +59,15 @@ internal static class PlantSimulation
     /// than trusted. NaN has no meaningful clamp, so it resolves to
     /// <see cref="InitialSetpoint"/> instead of propagating.
     /// </summary>
+    /// <param name="requested">
+    /// The value the client asked for, in degrees Celsius.
+    /// </param>
+    /// <returns>
+    /// <paramref name="requested"/> when it already lies between
+    /// <see cref="MinimumSetpoint"/> and <see cref="MaximumSetpoint"/>, the
+    /// nearer bound when it does not, and <see cref="InitialSetpoint"/> for
+    /// <see cref="double.NaN"/>.
+    /// </returns>
     internal static double ClampSetpoint(double requested) =>
         double.IsNaN(requested) ? InitialSetpoint : Math.Clamp(requested, MinimumSetpoint, MaximumSetpoint);
 }

@@ -143,6 +143,46 @@ here; this section records only what is specific to this repo.
   fields.** Follow the skill's shape, not its identifiers: `.editorconfig` enforces `_camelCase`
   private fields (IDE1006 + warnings-as-errors), so `m_state` **does not compile** here.
 
+## Documentation and comments
+
+`CS1591` sits in `NoWarn` (`Directory.Build.props`), so nothing forces a doc comment onto a public
+member — the rules below are the standard, not the compiler's. What the compiler _does_ enforce is
+that any doc comment you write is correct: `CS1573` (some params documented, not all) and `CS1574`
+(unresolvable `cref`) are warnings, and warnings are errors here.
+
+- **Document every public and protected member, plus the `internal` ones that carry a contract**
+  (`PlantSimulation`, `PlantServerOptions`, `PlantClient`, `TestPkiRoot`). Say what a caller cannot
+  read off the signature: units (degrees Celsius), valid ranges, nullability, who owns and disposes
+  what, thread-safety, what a returned `Task` actually promises, when a `CancellationToken` fires
+  and whether it ends or faults the operation, and every exception thrown on purpose. A `<summary>`
+  that restates the member name is worse than none.
+- **`<param>`, `<returns>` and `<exception>` are part of the doc, not decoration.** Documenting some
+  parameters and not others is the one case the compiler catches, and it fails the build.
+- **Prefer `<see cref="..."/>` to `<c>TypeName</c>`** wherever the name resolves — a cref is checked
+  documentation, plain text rots silently. Use `<inheritdoc />` when an interface or base member
+  already says it, and keep the specific text when the override's contract is narrower (see
+  `PlantServerFixture.InitializeAsync`, which promises readiness that `IAsyncLifetime` does not).
+- **A partial type carries its XML doc on exactly one declaration.** Roslyn concatenates the doc
+  comments of every part into a single `<member>` entry, so two parts with a `<summary>` each emit a
+  `<member>` holding two summaries — no warning, malformed output. `PlantNodeManager` is documented
+  on `PlantNodeManager.cs`; `PlantNodeManager.Configure.cs` opens with a plain `//` header instead.
+  The source generator's own partial contributes a second `<summary>` we cannot remove; that one is
+  expected, and it is why a third would go unnoticed.
+- **Test methods are documented by their names.** `<Method>_<Scenario>_Should<Result>` is the
+  documentation, so the CS1591s in the test projects are deliberate — do not paper them over with
+  XML comments. Test _classes_ do get a one-line `<summary>` naming the surface they cover.
+
+For plain `//` comments, the bar is that the comment says something the code cannot: a protocol
+constraint, an analyzer workaround, a concurrency assumption, an accepted ceiling (`ponytail:`), a
+security choice someone might "simplify" away. Delete narration of the next line, restatements of
+the signature, and archaeology about how the code used to look — "the previous `int.TryParse`
+fallback" means nothing to a first-time reader. A comment explaining _what_ a block does is a block
+that wants a name.
+
+Two comments here look like noise and are load-bearing: the empty `while` body draining
+`_setpointChanges` in `PlantNodeManager.Configure.cs` and the empty `catch` in `TestPkiRoot.Delete`.
+Sonar `S108` fails the build on an empty block, and a comment is what satisfies it.
+
 Commits are Conventional Commits (`commitlint.config.cjs`). `.pre-commit-config.yaml` wires
 csharpier, prettier and commitlint, but the hooks are **not installed** in this clone — run the
 checks manually before committing, or `pre-commit install`.
