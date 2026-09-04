@@ -60,16 +60,14 @@ internal enum PlantRole
     Operator,
 }
 
-#pragma warning disable CS1574
 /// <summary>
 /// One user seeded into the in-memory user store at startup.
 /// </summary>
 /// <remarks>
-/// These are validated by <see cref="PlantUsers.CreateUserDatabase"/>, not by data annotations:
+/// These are validated by <c>PlantUsers.CreateUserDatabase</c>, not by data annotations:
 /// <c>ValidateDataAnnotations</c> inspects only the top-level properties of an options object and
 /// does not recurse into collection items, so attributes here would never run.
 /// </remarks>
-#pragma warning restore CS1574
 internal sealed record PlantUserOptions
 {
     /// <summary>User name presented in the OPC UA identity token. Never blank.</summary>
