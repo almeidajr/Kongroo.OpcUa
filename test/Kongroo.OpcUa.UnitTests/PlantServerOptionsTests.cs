@@ -4,6 +4,10 @@ using Shouldly;
 
 namespace Kongroo.OpcUa.UnitTests;
 
+/// <summary>
+/// Covers the binding defaults and the <c>[Range]</c> contract that decides
+/// whether the host boots or refuses to.
+/// </summary>
 public sealed class PlantServerOptionsTests
 {
     [Fact]

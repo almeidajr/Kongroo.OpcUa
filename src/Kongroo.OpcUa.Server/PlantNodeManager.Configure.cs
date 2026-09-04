@@ -6,16 +6,12 @@ using Opc.Ua.Server.Fluent;
 
 namespace Kongroo.OpcUa.Server;
 
-/// <summary>
-/// Behaviour wiring for <see cref="PlantNodeManager"/>. Runs once at
-/// startup, after the generated base has materialized the predefined
-/// Plant instance, so every browse path below is addressable here.
-/// </summary>
-/// <remarks>
-/// Wiring resolves eagerly: a bad browse path throws on boot rather than
-/// on a client's first read. That is deliberate — do not wrap
-/// <c>Configure</c> in a try/catch.
-/// </remarks>
+// Behaviour wiring for the Plant nodes; the type itself is documented on the
+// declaration in PlantNodeManager.cs. Configure runs once at startup, after
+// the generated base has materialized the predefined Plant instance, so every
+// browse path below is addressable here. Wiring resolves eagerly: a bad browse
+// path throws on boot rather than on a client's first read. That is deliberate
+// — do not wrap Configure in a try/catch.
 public sealed partial class PlantNodeManager
 {
     /// <summary>
@@ -38,12 +34,11 @@ public sealed partial class PlantNodeManager
 
     partial void Configure(IPlantNodeManagerBuilder builder)
     {
-        // Stamped here rather than in the field initializer: a field
-        // initializer cannot reference an instance field (CS0236).
-        // Configure runs once at startup before any client exists, so a
-        // plain assignment is safe; every later mutation is atomic.
-        // Must stay the FIRST statement: PollEvery primes the node by
-        // invoking the sample lambda synchronously at wiring time, so an
+        // Stamped here because a field initializer cannot reference an
+        // instance field (CS0236). Configure runs once at startup before any
+        // client exists, so a plain assignment is safe; every later mutation
+        // is atomic. Must stay the FIRST statement: PollEvery primes the node
+        // by invoking the sample lambda synchronously at wiring time, so an
         // epoch stamped after the wiring block would prime the node from
         // EpochTicks = 0 — a first sample dated year 1.
         _state = _state with
@@ -69,11 +64,10 @@ public sealed partial class PlantNodeManager
         // reads back its own unclamped number instead of the clamp.
         builder.Plant.Setpoint.OnRead(() => _state.Setpoint).OnWrite(requested => ApplySetpoint(requested));
 
-        // Returns the accepted value so a client can observe the clamp
-        // without reading the variable back. The block lambda is not
-        // redundant: IDE0200/IDE0350 demand the method group
-        // OnCall(ApplySetpoint), and Sonar S3241 then flags ApplySetpoint's
-        // return value as unused. This shape satisfies both, no suppression.
+        // The block lambda is not redundant: IDE0200/IDE0350 demand the method
+        // group OnCall(ApplySetpoint), and Sonar S3241 then flags
+        // ApplySetpoint's return value as unused. This shape satisfies both,
+        // no suppression.
         builder.Plant.SetSetpoint.OnCall(requested =>
         {
             var accepted = ApplySetpoint(requested);
@@ -87,9 +81,20 @@ public sealed partial class PlantNodeManager
     }
 
     /// <summary>
-    /// Validates and applies a client-supplied setpoint, then offers the
-    /// accepted value for event publication. Returns the value applied.
+    /// Clamps a client-supplied setpoint to the range allowed by
+    /// <see cref="PlantSimulation.ClampSetpoint"/>, publishes it as the
+    /// current setpoint, and queues it for event delivery.
     /// </summary>
+    /// <param name="requested">
+    /// Setpoint requested by the client, in degrees Celsius. Any
+    /// <see cref="double"/> is accepted, including NaN and the infinities.
+    /// </param>
+    /// <returns>The setpoint actually applied, in degrees Celsius.</returns>
+    /// <remarks>
+    /// Safe to call concurrently: the state swap is a compare-and-exchange and
+    /// the queue write never blocks. Queuing is best effort — a full channel
+    /// evicts its oldest entry rather than failing the client's write.
+    /// </remarks>
     private double ApplySetpoint(double requested)
     {
         var accepted = PlantSimulation.ClampSetpoint(requested);
@@ -107,29 +112,42 @@ public sealed partial class PlantNodeManager
         // reads 40. Accepted ceiling: every event is individually true and
         // clients read current values from the variable. Serialize the two
         // steps only if event order ever has to match state order.
-
-        // Deliberately fire-and-forget: with DropOldest a full channel never
-        // blocks or rejects this write, it evicts the oldest queued value
-        // instead, so a slow or absent event consumer can never fail it.
         _setpointChanges.Writer.TryWrite(accepted);
 
         return accepted;
     }
 
     /// <summary>
-    /// Streams one <c>SetpointChangedEventType</c> per accepted setpoint.
-    /// The event registry populates EventId, EventType, SourceNode,
-    /// SourceName, Time and ReceiveTime, so only NewSetpoint is set here.
+    /// Streams one <see cref="SetpointChangedEventState"/> per setpoint
+    /// accepted while the stream is running. Values queued before it started
+    /// are discarded rather than replayed.
     /// </summary>
+    /// <param name="notifier">The Plant object reporting the events.</param>
+    /// <param name="context">
+    /// System context of the publishing server, supplied by the fluent event
+    /// source; the Plant events carry no context-dependent fields.
+    /// </param>
+    /// <param name="cancellationToken">
+    /// Cancelled by the stack when the last event subscriber goes away, which
+    /// ends the stream rather than faulting it.
+    /// </param>
+    /// <returns>
+    /// A sequence that stays open for the lifetime of the event subscription,
+    /// yielding an event per accepted setpoint.
+    /// </returns>
+    /// <remarks>
+    /// Only <c>NewSetpoint</c> is populated: the event registry fills EventId,
+    /// EventType, SourceNode, SourceName, Time and ReceiveTime. Discarding the
+    /// backlog matches OPC UA event semantics, where a subscription delivers
+    /// changes occurring after it starts; replaying stale values would stamp
+    /// old changes with a current Time and ReceiveTime.
+    /// </remarks>
     private async IAsyncEnumerable<SetpointChangedEventState> SetpointChangesAsync(
         BaseObjectState notifier,
         ISystemContext context,
         [EnumeratorCancellation] CancellationToken cancellationToken
     )
     {
-        // Discard anything buffered while no client was subscribed. An OPC UA event
-        // subscription delivers changes that occur after it starts; replaying a stale
-        // backlog would stamp old changes with a current Time/ReceiveTime.
         while (_setpointChanges.Reader.TryRead(out _))
         {
             // Intentionally empty: draining for its side effect.

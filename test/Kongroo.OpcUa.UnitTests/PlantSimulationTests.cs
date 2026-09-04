@@ -3,6 +3,10 @@ using Shouldly;
 
 namespace Kongroo.OpcUa.UnitTests;
 
+/// <summary>
+/// Covers the pure simulation: the waveform at the four cardinal points of
+/// one oscillation period, and every branch of the setpoint trust boundary.
+/// </summary>
 public sealed class PlantSimulationTests
 {
     private static readonly DateTimeOffset Epoch = new(2026, 9, 1, 12, 0, 0, TimeSpan.Zero);

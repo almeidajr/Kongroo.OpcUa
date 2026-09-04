@@ -37,9 +37,9 @@ builder.Services.AddSingleton(TimeProvider.System);
 
 const string applicationName = "KongrooOpcUaServer";
 
-// ValidateOnStart turns a malformed port into a refusal to boot. The previous
-// int.TryParse fallback silently started on the default instead, which looks
-// exactly like a working server on the wrong port.
+// ValidateOnStart turns a malformed port into a refusal to boot. Falling back
+// to the default instead would look exactly like a working server on the wrong
+// port.
 builder
     .Services.AddOptions<PlantServerOptions>()
     .Bind(builder.Configuration.GetSection(PlantServerOptions.SectionName))

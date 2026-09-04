@@ -16,6 +16,11 @@ namespace Kongroo.OpcUa.IntegrationTests;
 /// acceptable here because this is test-only code; production
 /// <c>Program.cs</c> keeps the stack's secure defaults.
 /// </summary>
+/// <remarks>
+/// One server is shared by every test in the class that takes the fixture, so
+/// tests see each other's writes. State that must not leak between tests has
+/// to be set by the test itself.
+/// </remarks>
 public sealed class PlantServerFixture : IAsyncLifetime
 {
     /// <summary>
@@ -30,11 +35,26 @@ public sealed class PlantServerFixture : IAsyncLifetime
     /// <summary>
     /// The <c>opc.tcp</c> endpoint the in-process server listens on.
     /// </summary>
+    /// <value>
+    /// A loopback URL carrying the port picked for this run, or an empty
+    /// string before <see cref="InitializeAsync"/> has completed.
+    /// </value>
     public string EndpointUrl { get; private set; } = string.Empty;
 
     /// <summary>
     /// Starts the server and returns once it is accepting connections.
     /// </summary>
+    /// <returns>
+    /// A task that completes when the endpoint listeners are bound, so a
+    /// client may connect as soon as it is awaited.
+    /// </returns>
+    /// <exception cref="TimeoutException">
+    /// The server did not open its listeners within <see cref="StartTimeout"/>.
+    /// </exception>
+    /// <exception cref="OperationCanceledException">
+    /// The host shut down while starting, which is how a failed boot surfaces
+    /// instead of waiting out the timeout.
+    /// </exception>
     public async ValueTask InitializeAsync()
     {
         const string applicationName = "KongrooOpcUaServer";
@@ -85,6 +105,10 @@ public sealed class PlantServerFixture : IAsyncLifetime
     /// <summary>
     /// Stops the server and removes its ephemeral certificate store.
     /// </summary>
+    /// <returns>
+    /// A task that completes once the host has stopped; store removal is best
+    /// effort and never faults it.
+    /// </returns>
     public async ValueTask DisposeAsync()
     {
         if (_host is not null)
@@ -96,6 +120,11 @@ public sealed class PlantServerFixture : IAsyncLifetime
         TestPkiRoot.Delete(_pkiRoot);
     }
 
+    /// <summary>
+    /// Asks the OS for an unused loopback port. Inherently racy — nothing
+    /// holds the port between this call and the server binding it — but it
+    /// keeps concurrent runs off a fixed port.
+    /// </summary>
     private static int FindFreePort()
     {
         using var listener = new TcpListener(IPAddress.Loopback, port: 0);
@@ -115,8 +144,10 @@ public sealed class PlantServerFixture : IAsyncLifetime
     {
         private readonly TaskCompletionSource _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+        /// <summary>Completes when the server's endpoints are listening.</summary>
         internal Task Started => _started.Task;
 
+        /// <inheritdoc />
         public ValueTask OnServerStartedAsync(IServerContext server, CancellationToken cancellationToken = default)
         {
             _started.TrySetResult();

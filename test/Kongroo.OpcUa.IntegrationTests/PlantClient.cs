@@ -17,9 +17,16 @@ namespace Kongroo.OpcUa.IntegrationTests;
 /// subscribe to events.
 /// </summary>
 /// <remarks>
+/// <para>
 /// Every node is addressed by browse path from the Objects folder rather
-/// than by a literal <c>NodeId</c>: the Plant namespace index is assigned
-/// at runtime and is not stable across runs.
+/// than by a literal <see cref="NodeId"/>: the Plant namespace index is
+/// assigned at runtime and is not stable across runs.
+/// </para>
+/// <para>
+/// An instance owns a session, a client host and an ephemeral certificate
+/// store, so every client obtained from <see cref="ConnectAsync"/> must be
+/// disposed. Instances are not thread-safe; drive one from a single test.
+/// </para>
 /// </remarks>
 internal sealed class PlantClient : IAsyncDisposable
 {
@@ -43,6 +50,22 @@ internal sealed class PlantClient : IAsyncDisposable
     /// Discovers the endpoint at <paramref name="endpointUrl"/> and opens an
     /// anonymous, signed-and-encrypted session on it.
     /// </summary>
+    /// <param name="endpointUrl">
+    /// The server's <c>opc.tcp</c> URL, used for discovery as well as for the
+    /// session.
+    /// </param>
+    /// <param name="cancellationToken">Abandons the connection attempt.</param>
+    /// <returns>
+    /// A connected client the caller owns and must dispose. When connecting
+    /// fails, everything opened along the way is released before the exception
+    /// propagates.
+    /// </returns>
+    /// <exception cref="InvalidOperationException">
+    /// The server does not expose the Plant namespace.
+    /// </exception>
+    /// <exception cref="OperationCanceledException">
+    /// <paramref name="cancellationToken"/> was signalled while connecting.
+    /// </exception>
     public static async Task<PlantClient> ConnectAsync(
         string endpointUrl,
         CancellationToken cancellationToken = default
@@ -70,9 +93,16 @@ internal sealed class PlantClient : IAsyncDisposable
     }
 
     /// <summary>
-    /// Returns the browse name of every node reachable from
-    /// <paramref name="parent"/> by a forward hierarchical reference.
+    /// Browses one level below <paramref name="parent"/>, following forward
+    /// hierarchical references.
     /// </summary>
+    /// <param name="parent">Node to browse from.</param>
+    /// <param name="cancellationToken">Abandons the browse.</param>
+    /// <returns>
+    /// The browse name of each child, in the order the server returned them.
+    /// Children whose browse name has no text are omitted, so the result can
+    /// be shorter than the reference list.
+    /// </returns>
     public async Task<IReadOnlyList<string>> BrowseChildrenAsync(
         NodeId parent,
         CancellationToken cancellationToken = default
@@ -101,6 +131,16 @@ internal sealed class PlantClient : IAsyncDisposable
     /// Reads <c>Plant/<paramref name="browseName"/></c> as a
     /// <see cref="double"/>. Always hits the server, never a cache.
     /// </summary>
+    /// <param name="browseName">Browse name of the variable below Plant.</param>
+    /// <param name="cancellationToken">Abandons the read.</param>
+    /// <returns>The value the server reports for that variable.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// No node answers that browse path below the Objects folder.
+    /// </exception>
+    /// <exception cref="ServiceResultException">
+    /// The server rejected the read, or the value is not a
+    /// <see cref="double"/>.
+    /// </exception>
     public async Task<double> ReadDoubleAsync(string browseName, CancellationToken cancellationToken = default)
     {
         var nodeId = await ResolvePlantChildAsync(browseName, cancellationToken);
@@ -110,9 +150,22 @@ internal sealed class PlantClient : IAsyncDisposable
 
     /// <summary>
     /// Writes <paramref name="value"/> to
-    /// <c>Plant/<paramref name="browseName"/></c>, throwing when the server
-    /// reports a bad status.
+    /// <c>Plant/<paramref name="browseName"/></c>.
     /// </summary>
+    /// <param name="browseName">Browse name of the variable below Plant.</param>
+    /// <param name="value">Value to write, in the variable's own units.</param>
+    /// <param name="cancellationToken">Abandons the write.</param>
+    /// <returns>
+    /// A task that completes once the server has reported a good status.
+    /// Completion does not promise the node now reads back
+    /// <paramref name="value"/>: the server may clamp it.
+    /// </returns>
+    /// <exception cref="InvalidOperationException">
+    /// No node answers that browse path below the Objects folder.
+    /// </exception>
+    /// <exception cref="ServiceResultException">
+    /// The server reported a bad status for the write.
+    /// </exception>
     public async Task WriteDoubleAsync(string browseName, double value, CancellationToken cancellationToken = default)
     {
         var nodeId = await ResolvePlantChildAsync(browseName, cancellationToken);
@@ -137,9 +190,19 @@ internal sealed class PlantClient : IAsyncDisposable
     }
 
     /// <summary>
-    /// Calls <c>Plant/SetSetpoint</c> and returns its single output
-    /// argument, the setpoint the server actually applied.
+    /// Calls <c>Plant/SetSetpoint</c>, the method that reports back what the
+    /// server did with the request.
     /// </summary>
+    /// <param name="requested">Setpoint to ask for, in degrees Celsius.</param>
+    /// <param name="cancellationToken">Abandons the call.</param>
+    /// <returns>
+    /// The method's single output argument: the setpoint actually applied,
+    /// which differs from <paramref name="requested"/> when it was clamped.
+    /// </returns>
+    /// <exception cref="InvalidOperationException">
+    /// The Plant object or the method could not be resolved, or the call
+    /// returned something other than one <see cref="double"/>.
+    /// </exception>
     public async Task<double> CallSetSetpointAsync(double requested, CancellationToken cancellationToken = default)
     {
         var plantNodeId = await ResolveAsync([PlantBrowseName], cancellationToken);
@@ -165,6 +228,16 @@ internal sealed class PlantClient : IAsyncDisposable
     /// starts and removed when the enumerator is disposed, so the server's
     /// event source activates and tears down with this stream.
     /// </summary>
+    /// <param name="cancellationToken">
+    /// Ends the stream. Because the monitored item is created asynchronously
+    /// once enumeration starts, changes made before the first result arrives
+    /// may never be delivered.
+    /// </param>
+    /// <returns>
+    /// A sequence that stays open until cancelled, yielding a
+    /// <see cref="Kongroo.OpcUa.Server.SetpointChangedEventTypeRecord"/> per
+    /// event. Notifications that decode to any other event type are skipped.
+    /// </returns>
     /// <remarks>
     /// A private decoder registry rather than
     /// <see cref="EventRecordDecoderRegistry.Default"/>: the composed field
@@ -211,6 +284,10 @@ internal sealed class PlantClient : IAsyncDisposable
     /// Closes the session, stops the client host and removes the ephemeral
     /// certificate store.
     /// </summary>
+    /// <returns>
+    /// A task that completes once the session and host are down; store removal
+    /// is best effort and never faults it.
+    /// </returns>
     public async ValueTask DisposeAsync()
     {
         await _session.DisposeAsync();
