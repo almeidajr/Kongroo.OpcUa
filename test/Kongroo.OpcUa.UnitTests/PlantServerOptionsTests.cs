@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using Kongroo.OpcUa.Server;
+using Microsoft.Extensions.Configuration;
 using Shouldly;
 
 namespace Kongroo.OpcUa.UnitTests;
@@ -32,6 +33,45 @@ public sealed class PlantServerOptionsTests
         var errors = ValidationErrorsFor(0);
 
         errors.ShouldContain(error => error.Contains(nameof(PlantServerOptions.Port), StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Users_WhenBoundFromConfiguration_ShouldPopulateEveryEntryWithItsRole()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(
+                new Dictionary<string, string?>
+                {
+                    ["OpcUa:Users:0:Name"] = "observer",
+                    ["OpcUa:Users:0:Password"] = "observer-password",
+                    ["OpcUa:Users:0:Role"] = "Observer",
+                    ["OpcUa:Users:1:Name"] = "operator",
+                    ["OpcUa:Users:1:Password"] = "operator-password",
+                    ["OpcUa:Users:1:Role"] = "Operator",
+                }
+            )
+            .Build();
+
+        var options = configuration.GetSection(PlantServerOptions.SectionName).Get<PlantServerOptions>();
+
+        options.ShouldNotBeNull();
+        options.Users.Count.ShouldBe(2);
+        options.Users[0].Name.ShouldBe("observer");
+        options.Users[0].Role.ShouldBe(PlantRole.Observer);
+        options.Users[1].Role.ShouldBe(PlantRole.Operator);
+    }
+
+    [Fact]
+    public void Users_WhenConfigurationHasNoUsersSection_ShouldBeEmpty()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["OpcUa:Port"] = "62552" })
+            .Build();
+
+        var options = configuration.GetSection(PlantServerOptions.SectionName).Get<PlantServerOptions>();
+
+        options.ShouldNotBeNull();
+        options.Users.ShouldBeEmpty();
     }
 
     // Mirrors what ValidateDataAnnotations does at host start, so the [Range]
