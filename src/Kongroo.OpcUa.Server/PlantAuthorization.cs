@@ -48,12 +48,13 @@ internal static class PlantAuthorization
     /// <see cref="Role.Operator"/> — including <see cref="Role.Anonymous"/> — holds nothing.
     /// </param>
     /// <returns>The permission bits granted, or <see cref="PermissionType.None"/>.</returns>
-#pragma warning disable S3358
     internal static PermissionType PermissionsFor(PlantNode node, Role role) =>
-        role == Role.Operator ? OperatorPermissionsFor(node)
-        : role == Role.Observer ? ObserverPermissionsFor(node)
-        : PermissionType.None;
-#pragma warning restore S3358
+        role switch
+        {
+            _ when role == Role.Operator => OperatorPermissionsFor(node),
+            _ when role == Role.Observer => ObserverPermissionsFor(node),
+            _ => PermissionType.None,
+        };
 
     /// <summary>
     /// The <c>RolePermissions</c> attribute value for <paramref name="node"/>: one entry per role

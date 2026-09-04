@@ -82,16 +82,19 @@ public sealed class PlantAuthorizationTests
         PlantAuthorization.PermissionsFor(PlantNode.Setpoint, Role.Engineer).ShouldBe(PermissionType.None);
 
     [Fact]
-    public void PermissionsFor_WithAnyRole_ShouldGrantReceiveEventsOnPlantOnly()
+    public void PermissionsFor_WithAnyGrantedRole_ShouldGrantReceiveEventsOnPlantOnly()
     {
-        PlantAuthorization
-            .PermissionsFor(PlantNode.Plant, Role.Observer)
-            .HasFlag(PermissionType.ReceiveEvents)
-            .ShouldBeTrue();
-        PlantAuthorization
-            .PermissionsFor(PlantNode.Setpoint, Role.Observer)
-            .HasFlag(PermissionType.ReceiveEvents)
-            .ShouldBeFalse();
+        foreach (var role in new[] { Role.Observer, Role.Operator })
+        {
+            PlantAuthorization
+                .PermissionsFor(PlantNode.Plant, role)
+                .HasFlag(PermissionType.ReceiveEvents)
+                .ShouldBeTrue();
+            PlantAuthorization
+                .PermissionsFor(PlantNode.Setpoint, role)
+                .HasFlag(PermissionType.ReceiveEvents)
+                .ShouldBeFalse();
+        }
     }
 
     [Fact]
