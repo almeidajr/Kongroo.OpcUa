@@ -52,11 +52,15 @@ builder
 // Bound eagerly, not through IOptions: the user store is a constructor argument to services
 // registered below, so it has to exist before the provider does. A malformed user throws here,
 // which is what makes a bad configuration a refusal to boot rather than a silent weak account.
-var plantOptions =
+// Named startupPlantOptions, not plantOptions: the pre-existing
+// Configure<IOptions<PlantServerOptions>> lambda further down already binds a parameter called
+// plantOptions, at the wrapper type. One identifier for two different types in one file invites a
+// reader at that lambda to think it is this value.
+var startupPlantOptions =
     builder.Configuration.GetSection(PlantServerOptions.SectionName).Get<PlantServerOptions>()
     ?? new PlantServerOptions();
 
-var userDatabase = PlantUsers.CreateUserDatabase(plantOptions.Users);
+var userDatabase = PlantUsers.CreateUserDatabase(startupPlantOptions.Users);
 var userManagement = new UserManagement(
     userDatabase,
     // Fully qualified: ImplicitUsings is enabled repo-wide, so a bare `Range` is ambiguous
@@ -121,7 +125,7 @@ builder
         {
             var definition = new RoleDefinitionOptions { Name = PlantUsers.BrowseNameFor(role) };
 
-            foreach (var user in plantOptions.Users.Where(candidate => candidate.Role == role))
+            foreach (var user in startupPlantOptions.Users.Where(candidate => candidate.Role == role))
             {
                 definition.Identities.Add(
                     new RoleIdentityMappingOptions
