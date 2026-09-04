@@ -1,5 +1,6 @@
 using System.Globalization;
 using Kongroo.OpcUa.Server;
+using Microsoft.Extensions.Options;
 using Opc.Ua;
 using Opc.Ua.Server.Hosting;
 using OpenTelemetry.Metrics;
@@ -35,7 +36,15 @@ builder
 builder.Services.AddSingleton(TimeProvider.System);
 
 const string applicationName = "KongrooOpcUaServer";
-var port = int.TryParse(builder.Configuration["OpcUa:Port"], out var configuredPort) ? configuredPort : 62552;
+
+// ValidateOnStart turns a malformed port into a refusal to boot. The previous
+// int.TryParse fallback silently started on the default instead, which looks
+// exactly like a working server on the wrong port.
+builder
+    .Services.AddOptions<PlantServerOptions>()
+    .Bind(builder.Configuration.GetSection(PlantServerOptions.SectionName))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
 
 builder
     .Services.AddOpcUa()
@@ -53,7 +62,16 @@ builder
         options.IncludeSignAndEncryptPolicies = true;
         options.IncludeUnsecurePolicyNone = false;
         options.UserTokenPolicies.Add(new OpcUaUserTokenPolicy { TokenType = UserTokenType.Anonymous });
-        options.EndpointUrls.Add($"opc.tcp://localhost:{port}/{applicationName}");
+        // Not the stack's default %TEMP%/OPC Foundation/{App}/pki: %TEMP% is
+        // routinely cleared, and a server that loses its certificate store
+        // regenerates its identity on the next boot, forcing every client to
+        // re-trust it.
+        options.PkiRoot = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "Kongroo",
+            "OpcUaServer",
+            "pki"
+        );
     })
     .AddDefaultIdentityAuthenticators(options =>
     {
@@ -65,6 +83,17 @@ builder
         options.EnableJwt = false;
     })
     .AddNodeManager<PlantNodeManagerFactory>();
+
+// AddServer's callback is an Action<OpcUaServerOptions> with no access to DI,
+// so the one setting that comes from configuration is applied in a second,
+// dependency-aware Configure. Configure actions run in registration order, so
+// this lands after the block above.
+builder
+    .Services.AddOptions<OpcUaServerOptions>()
+    .Configure<IOptions<PlantServerOptions>>(
+        (serverOptions, plantOptions) =>
+            serverOptions.EndpointUrls.Add($"opc.tcp://localhost:{plantOptions.Value.Port}/{applicationName}")
+    );
 
 var host = builder.Build();
 
