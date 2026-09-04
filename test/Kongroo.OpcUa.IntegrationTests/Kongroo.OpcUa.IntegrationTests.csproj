@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <RootNamespace>Kongroo.OpcUa.UnitTests</RootNamespace>
+    <RootNamespace>Kongroo.OpcUa.IntegrationTests</RootNamespace>
     <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
     <UseMicrosoftTestingPlatformRunner>true</UseMicrosoftTestingPlatformRunner>
     <NoWarn>$(NoWarn);CA1707</NoWarn>
@@ -20,6 +20,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="OPCFoundation.NetStandard.Opc.Ua.Client" />
     <PackageReference Include="Shouldly" />
     <PackageReference Include="xunit.v3.mtp-v2" />
   </ItemGroup>

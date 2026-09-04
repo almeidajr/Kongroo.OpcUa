@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="utf-8"?>
+<opc:ModelDesign
+  xmlns:uax="http://opcfoundation.org/UA/2008/02/Types.xsd"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xmlns:ua="http://opcfoundation.org/UA/"
+  xmlns:opc="http://opcfoundation.org/UA/ModelDesign.xsd"
+  xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+  xmlns="http://kongroo.dev/UA/Plant/"
+  TargetNamespace="http://kongroo.dev/UA/Plant/"
+  TargetXmlNamespace="http://kongroo.dev/UA/Plant/Types.xsd"
+  TargetVersion="1.00.0"
+  TargetPublicationDate="2026-09-01T00:00:00Z"
+>
+  <opc:Namespaces>
+    <opc:Namespace
+      Name="Plant"
+      Prefix="Kongroo.OpcUa.Server"
+      XmlNamespace="http://kongroo.dev/UA/Plant/Types.xsd"
+      XmlPrefix="Plant"
+      >http://kongroo.dev/UA/Plant/</opc:Namespace>
+    <opc:Namespace
+      Name="OpcUa"
+      Prefix="Opc.Ua"
+      Version="1.05.07"
+      PublicationDate="2025-12-25T00:00:00Z"
+      InternalPrefix="Opc.Ua.Server"
+      XmlNamespace="http://opcfoundation.org/UA/2008/02/Types.xsd"
+      XmlPrefix="OpcUa"
+      >http://opcfoundation.org/UA/</opc:Namespace>
+  </opc:Namespaces>
+
+  <!--
+    Sets the setpoint and returns the value actually applied. The output
+    argument exists so a client can observe the effect of ClampSetpoint
+    rather than having to read the variable back.
+  -->
+  <opc:Method SymbolicName="SetSetpointMethodType">
+    <opc:Description>Sets the setpoint and returns the accepted value after clamping.</opc:Description>
+    <opc:InputArguments>
+      <opc:Argument Name="setpoint" DataType="ua:Double">
+        <opc:Description>Requested setpoint in degrees Celsius.</opc:Description>
+      </opc:Argument>
+    </opc:InputArguments>
+    <opc:OutputArguments>
+      <opc:Argument Name="acceptedSetpoint" DataType="ua:Double">
+        <opc:Description>The setpoint actually applied, after clamping to the valid range.</opc:Description>
+      </opc:Argument>
+    </opc:OutputArguments>
+  </opc:Method>
+
+  <!--
+    Custom event type. The model compiler emits SetpointChangedEventState;
+    the event registry fills EventId/EventType/SourceNode/SourceName/Time/
+    ReceiveTime automatically, so the publisher sets only NewSetpoint.
+  -->
+  <opc:ObjectType SymbolicName="SetpointChangedEventType" BaseType="ua:BaseEventType">
+    <opc:Description>Raised whenever the setpoint changes, by write or by method call.</opc:Description>
+    <opc:Children>
+      <opc:Property SymbolicName="NewSetpoint" DataType="ua:Double" ModellingRule="Mandatory">
+        <opc:Description>The setpoint value that was accepted.</opc:Description>
+      </opc:Property>
+    </opc:Children>
+  </opc:ObjectType>
+
+  <!--
+    No child may be named after a NodeState member (Description,
+    DisplayName, ...) — the generated class would shadow the base member
+    and fail to compile. Temperature/Setpoint/SetSetpoint are all safe.
+  -->
+  <opc:ObjectType SymbolicName="PlantType" BaseType="ua:BaseObjectType">
+    <opc:Description>A simulated plant exposing a measured temperature and a writable setpoint.</opc:Description>
+    <opc:Children>
+      <opc:Variable
+        SymbolicName="Temperature"
+        DataType="ua:Double"
+        TypeDefinition="ua:BaseDataVariableType"
+        ValueRank="Scalar"
+        AccessLevel="Read"
+        ModellingRule="Mandatory"
+      >
+        <opc:Description>Simulated temperature in degrees Celsius, oscillating around the setpoint.</opc:Description>
+      </opc:Variable>
+      <opc:Variable
+        SymbolicName="Setpoint"
+        DataType="ua:Double"
+        TypeDefinition="ua:BaseDataVariableType"
+        ValueRank="Scalar"
+        AccessLevel="ReadWrite"
+        ModellingRule="Mandatory"
+      >
+        <opc:Description>Target temperature in degrees Celsius.</opc:Description>
+      </opc:Variable>
+      <opc:Method SymbolicName="SetSetpoint" TypeDefinition="SetSetpointMethodType" ModellingRule="Mandatory" />
+    </opc:Children>
+  </opc:ObjectType>
+
+  <!--
+    SupportsEvents="true" must sit on the Object INSTANCE, not the
+    ObjectType: FluentBuilderGenerator gates the typed Publish<TEvent>
+    accessor on ObjectDesign.SupportsEvents. The GeneratesEvent reference
+    additionally declares which event type this object emits.
+  -->
+  <opc:Object SymbolicName="Plant" TypeDefinition="PlantType" SupportsEvents="true">
+    <opc:Description>The plant instance, organized under the Objects folder.</opc:Description>
+    <opc:References>
+      <opc:Reference IsInverse="true">
+        <opc:ReferenceType>ua:Organizes</opc:ReferenceType>
+        <opc:TargetId>ua:ObjectsFolder</opc:TargetId>
+      </opc:Reference>
+      <opc:Reference>
+        <opc:ReferenceType>ua:GeneratesEvent</opc:ReferenceType>
+        <opc:TargetId>SetpointChangedEventType</opc:TargetId>
+      </opc:Reference>
+    </opc:References>
+  </opc:Object>
+</opc:ModelDesign>
