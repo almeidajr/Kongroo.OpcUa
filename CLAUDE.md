@@ -116,7 +116,9 @@ Everything below is enforced; ignoring it means a red build or red CI, not a sty
   and `PlantServerFixture.cs` have `using Opc.Ua;`, so a bare `Range` is CS0104 against
   `System.Range`. Its constructor is `(high, low)` — the first argument becomes `High`.
 - **Putting `RolePermissions` on an event source node kills event delivery for _every_ role on
-  `2.0.0-preview.3`.** `OperationContext(IMonitoredItem)` (`OperationContext.cs:147`) sets
+  `2.0.0-preview.3`.** The constructor `OperationContext(IMonitoredItem)`, `OperationContext.cs:147`
+  in the `D:\gsc\UA-.NETStandard` reference checkout — which tracks `master`, ahead of the
+  `2.0.0-preview.3` package this repo runs, so the line number is a `master` reference — sets
   `UserIdentity = monitoredItem.EffectiveIdentity` and then overwrites it with
   `UserIdentity = Session.Identity` whenever a session exists. `SessionManager` puts the
   role-bearing `RoleBasedIdentity` only into the _effective_ identity, so the per-event

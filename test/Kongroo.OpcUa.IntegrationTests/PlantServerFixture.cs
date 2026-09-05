@@ -134,29 +134,10 @@ public sealed class PlantServerFixture : IAsyncLifetime
                 options.EnableX509 = false;
                 options.EnableJwt = false;
             })
-            .ConfigureRoles(roleOptions =>
-            {
-                // ConfigureRoles alone registers the role manager; AddRoleManager is only for
-                // supplying a custom IRoleManager. Mirrors Program.cs, reading from the users
-                // seeded above instead of configuration.
-                foreach (var role in Enum.GetValues<PlantRole>())
-                {
-                    var definition = new RoleDefinitionOptions { Name = PlantUsers.BrowseNameFor(role) };
-
-                    foreach (var user in seededUsers.Where(candidate => candidate.Role == role))
-                    {
-                        definition.Identities.Add(
-                            new RoleIdentityMappingOptions
-                            {
-                                CriteriaType = IdentityCriteriaType.UserName,
-                                Criteria = user.Name,
-                            }
-                        );
-                    }
-
-                    roleOptions.Roles.Add(definition);
-                }
-            })
+            // ConfigureRoles alone registers the role manager; AddRoleManager is only for
+            // supplying a custom IRoleManager. Mirrors Program.cs, reading from the users seeded
+            // above instead of configuration.
+            .ConfigureRoles(roleOptions => PlantUsers.ConfigureRoles(roleOptions, seededUsers))
             .AddNodeManager<PlantNodeManagerFactory>();
 
         _host = builder.Build();

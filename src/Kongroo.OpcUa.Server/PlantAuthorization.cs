@@ -36,6 +36,14 @@ internal enum PlantNode
 /// the stack treats an <em>empty</em> permission list as "unrestricted" — so a mistake in this
 /// file grants access rather than denying it.
 /// </para>
+/// <para>
+/// One nuance to "Anonymous is granted nothing": the auto-generated <c>InputArguments</c> and
+/// <c>OutputArguments</c> property nodes under <see cref="PlantNode.SetSetpoint"/> carry no
+/// <c>RolePermissions</c> of their own, so per the fail-open rule above they are readable by any
+/// session that can name their NodeId — anonymous included, though it cannot reach them by browse.
+/// The disclosure is argument metadata only, and introspecting clients arguably need it, so this
+/// is left as documented behaviour rather than given permissions here.
+/// </para>
 /// </remarks>
 internal static class PlantAuthorization
 {

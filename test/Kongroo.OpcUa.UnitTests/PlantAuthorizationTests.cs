@@ -111,6 +111,15 @@ public sealed class PlantAuthorizationTests
     }
 
     [Fact]
+    public void RolePermissionsFor_WithAnyNode_ShouldNeverReturnAnEmptyList()
+    {
+        foreach (var node in Enum.GetValues<PlantNode>())
+        {
+            PlantAuthorization.RolePermissionsFor(node).ShouldNotBeEmpty();
+        }
+    }
+
+    [Fact]
     public void RolePermissionsFor_WithSetpoint_ShouldGrantWriteToOperatorOnly()
     {
         var operatorRoleId = ExpandedNodeId.ToNodeId(Role.Operator.RoleId, null!);

@@ -1,4 +1,5 @@
 using System.Text;
+using Opc.Ua;
 using Opc.Ua.Server;
 using Opc.Ua.Server.UserDatabase;
 
@@ -44,8 +45,8 @@ internal static class PlantUsers
             Validate(user);
 
             // LinqUserDatabase reports a duplicate by returning false rather than throwing, so the
-            // result is checked: silently keeping the first entry would leave the operator holding
-            // a password that never works.
+            // result is checked: AddOrUpdate overwrites the existing hash and roles before
+            // returning false, so an unchecked result would silently let the last entry win.
             if (!database.CreateUser(user.Name, Encoding.UTF8.GetBytes(user.Password), [ToRole(user.Role)]))
             {
                 throw new InvalidOperationException($"Duplicate user name in configuration: '{user.Name}'.");
@@ -84,12 +85,46 @@ internal static class PlantUsers
     /// <paramref name="role"/> is not a declared <see cref="PlantRole"/>.
     /// </exception>
     internal static string BrowseNameFor(PlantRole role) =>
+        // Fully qualified, not needless verbosity: the model generator emits a
+        // Kongroo.OpcUa.Server.BrowseNames class into this same namespace, so a bare BrowseNames
+        // binds to the generated class, which has no WellKnownRole_* members. A `using Opc.Ua;`
+        // would only make PlantUsersTests.cs ambiguous (CS0104) instead.
         role switch
         {
             PlantRole.Observer => Opc.Ua.BrowseNames.WellKnownRole_Observer,
             PlantRole.Operator => Opc.Ua.BrowseNames.WellKnownRole_Operator,
             _ => throw new ArgumentOutOfRangeException(nameof(role), role, "Unknown plant role."),
         };
+
+    /// <summary>
+    /// The single definition of the role-to-user mapping <c>ConfigureRoles</c> needs: one role
+    /// definition per <see cref="PlantRole"/>, holding a <see cref="RoleIdentityMappingOptions"/>
+    /// for every user that holds it. Both <c>Program.cs</c> and
+    /// <c>PlantServerFixture.cs</c> call this so the integration tests cannot drift from what the
+    /// server itself configures.
+    /// </summary>
+    /// <param name="roleOptions">The role configuration being built.</param>
+    /// <param name="users">Users to map onto their <see cref="PlantUserOptions.Role"/>.</param>
+    internal static void ConfigureRoles(RoleConfigurationOptions roleOptions, IEnumerable<PlantUserOptions> users)
+    {
+        foreach (var role in Enum.GetValues<PlantRole>())
+        {
+            var definition = new RoleDefinitionOptions { Name = BrowseNameFor(role) };
+
+            foreach (var user in users.Where(candidate => candidate.Role == role))
+            {
+                definition.Identities.Add(
+                    new RoleIdentityMappingOptions
+                    {
+                        CriteriaType = IdentityCriteriaType.UserName,
+                        Criteria = user.Name,
+                    }
+                );
+            }
+
+            roleOptions.Roles.Add(definition);
+        }
+    }
 
     private static void Validate(PlantUserOptions user)
     {

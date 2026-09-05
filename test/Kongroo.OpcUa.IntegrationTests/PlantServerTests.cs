@@ -322,7 +322,12 @@ public sealed class PlantServerTests(PlantServerFixture fixture) : IClassFixture
         exception.StatusCode.ShouldBe(StatusCodes.BadUserAccessDenied);
     }
 
-    [Fact]
+    [Fact(
+        Skip = "Non-discriminating while the upstream bug on the Operator subscribe test above is "
+            + "open: that bug drops every event for every role once the notifier carries "
+            + "RolePermissions, so this test cannot tell 'Anonymous was correctly denied' apart from "
+            + "'events are broken for everyone.' Re-enable when the stack fixes OperationContext.cs:147."
+    )]
     public async Task Subscribe_SetpointChanges_AsAnonymous_ShouldNotDeliverEvents()
     {
         // Non-discriminating while the upstream bug documented on the skipped Operator subscribe

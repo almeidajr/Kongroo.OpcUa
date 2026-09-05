@@ -2,7 +2,6 @@ using System.Globalization;
 using Kongroo.OpcUa.Server;
 using Microsoft.Extensions.Options;
 using Opc.Ua;
-using Opc.Ua.Server;
 using Opc.Ua.Server.Hosting;
 using Opc.Ua.Server.UserDatabase;
 using Opc.Ua.Server.UserManagement;
@@ -115,30 +114,11 @@ builder
         options.EnableX509 = false;
         options.EnableJwt = false;
     })
-    .ConfigureRoles(roleOptions =>
-    {
-        // ConfigureRoles alone registers the role manager; AddRoleManager is only for supplying a
-        // custom IRoleManager. RoleManager's constructor already seeds every well-known role, and
-        // roles are matched by BrowseName, so these resolve to the standard Part 18 NodeIds rather
-        // than creating new ones.
-        foreach (var role in Enum.GetValues<PlantRole>())
-        {
-            var definition = new RoleDefinitionOptions { Name = PlantUsers.BrowseNameFor(role) };
-
-            foreach (var user in startupPlantOptions.Users.Where(candidate => candidate.Role == role))
-            {
-                definition.Identities.Add(
-                    new RoleIdentityMappingOptions
-                    {
-                        CriteriaType = IdentityCriteriaType.UserName,
-                        Criteria = user.Name,
-                    }
-                );
-            }
-
-            roleOptions.Roles.Add(definition);
-        }
-    })
+    // ConfigureRoles alone registers the role manager; AddRoleManager is only for supplying a
+    // custom IRoleManager. RoleManager's constructor already seeds every well-known role, and
+    // roles are matched by BrowseName, so these resolve to the standard Part 18 NodeIds rather
+    // than creating new ones.
+    .ConfigureRoles(roleOptions => PlantUsers.ConfigureRoles(roleOptions, startupPlantOptions.Users))
     .AddNodeManager<PlantNodeManagerFactory>();
 
 // AddServer's callback is an Action<OpcUaServerOptions> with no access to DI,
