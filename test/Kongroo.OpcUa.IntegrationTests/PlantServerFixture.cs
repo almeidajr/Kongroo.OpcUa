@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
+using System.Text;
 using Kongroo.OpcUa.Server;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -7,6 +8,8 @@ using Microsoft.Extensions.Logging;
 using Opc.Ua;
 using Opc.Ua.Server;
 using Opc.Ua.Server.Hosting;
+using Opc.Ua.Server.UserDatabase;
+using Opc.Ua.Server.UserManagement;
 
 namespace Kongroo.OpcUa.IntegrationTests;
 
@@ -29,8 +32,21 @@ public sealed class PlantServerFixture : IAsyncLifetime
     /// </summary>
     private static readonly TimeSpan StartTimeout = TimeSpan.FromSeconds(60);
 
+    private const string ObserverUserName = "observer";
+    private const string ObserverPassword = "observer-password";
+    private const string OperatorUserName = "operator";
+    private const string OperatorPassword = "operator-password";
+
     private IHost? _host;
     private string _pkiRoot = string.Empty;
+
+    /// <summary>Identity of a user holding only the well-known Observer role.</summary>
+    public static UserIdentity ObserverIdentity { get; } =
+        new(ObserverUserName, Encoding.UTF8.GetBytes(ObserverPassword));
+
+    /// <summary>Identity of a user holding the well-known Operator role.</summary>
+    public static UserIdentity OperatorIdentity { get; } =
+        new(OperatorUserName, Encoding.UTF8.GetBytes(OperatorPassword));
 
     /// <summary>
     /// The <c>opc.tcp</c> endpoint the in-process server listens on.
@@ -67,6 +83,34 @@ public sealed class PlantServerFixture : IAsyncLifetime
         builder.Logging.SetMinimumLevel(LogLevel.Warning);
         builder.Services.AddSingleton<IServerStartupTask>(readySignal);
 
+        var seededUsers = new PlantUserOptions[]
+        {
+            new()
+            {
+                Name = ObserverUserName,
+                Password = ObserverPassword,
+                Role = PlantRole.Observer,
+            },
+            new()
+            {
+                Name = OperatorUserName,
+                Password = OperatorPassword,
+                Role = PlantRole.Operator,
+            },
+        };
+
+        var userDatabase = PlantUsers.CreateUserDatabase(seededUsers);
+        var userManagement = new UserManagement(
+            userDatabase,
+            // Fully qualified for the same CS0104 reason as Program.cs: ImplicitUsings is on and
+            // this file already has `using Opc.Ua;`. Order is (high, low).
+            new Opc.Ua.Range(64, PlantUsers.MinimumPasswordLength),
+            null,
+            null
+        );
+        builder.Services.AddSingleton<IUserDatabase>(userDatabase);
+        builder.Services.AddSingleton<IUserManagement>(userManagement);
+
         builder
             .Services.AddOpcUa()
             .AddServer(options =>
@@ -80,14 +124,38 @@ public sealed class PlantServerFixture : IAsyncLifetime
                 // without an out-of-band trust step.
                 options.AutoAcceptUntrustedCertificates = true;
                 options.UserTokenPolicies.Add(new OpcUaUserTokenPolicy { TokenType = UserTokenType.Anonymous });
+                options.UserTokenPolicies.Add(new OpcUaUserTokenPolicy { TokenType = UserTokenType.UserName });
                 options.EndpointUrls.Add(EndpointUrl);
             })
             .AddDefaultIdentityAuthenticators(options =>
             {
                 options.EnableAnonymous = true;
-                options.EnableUserNamePassword = false;
+                options.EnableUserNamePassword = true;
                 options.EnableX509 = false;
                 options.EnableJwt = false;
+            })
+            .ConfigureRoles(roleOptions =>
+            {
+                // ConfigureRoles alone registers the role manager; AddRoleManager is only for
+                // supplying a custom IRoleManager. Mirrors Program.cs, reading from the users
+                // seeded above instead of configuration.
+                foreach (var role in Enum.GetValues<PlantRole>())
+                {
+                    var definition = new RoleDefinitionOptions { Name = PlantUsers.BrowseNameFor(role) };
+
+                    foreach (var user in seededUsers.Where(candidate => candidate.Role == role))
+                    {
+                        definition.Identities.Add(
+                            new RoleIdentityMappingOptions
+                            {
+                                CriteriaType = IdentityCriteriaType.UserName,
+                                Criteria = user.Name,
+                            }
+                        );
+                    }
+
+                    roleOptions.Roles.Add(definition);
+                }
             })
             .AddNodeManager<PlantNodeManagerFactory>();
 

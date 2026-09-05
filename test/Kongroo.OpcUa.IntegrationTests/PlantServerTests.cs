@@ -1,3 +1,4 @@
+using System.Text;
 using Opc.Ua;
 using Shouldly;
 
@@ -32,6 +33,12 @@ public sealed class PlantServerTests(PlantServerFixture fixture) : IClassFixture
     /// </summary>
     private const double OscillationBand = 2.5001;
 
+    /// <summary>Lower bound of the simulation's setpoint clamp range.</summary>
+    private const double PlantSimulationMinimum = 5.0;
+
+    /// <summary>Upper bound of the simulation's setpoint clamp range.</summary>
+    private const double PlantSimulationMaximum = 95.0;
+
     private static readonly TimeSpan TemperatureSettleTimeout = TimeSpan.FromSeconds(10.0);
     private static readonly TimeSpan TemperaturePollInterval = TimeSpan.FromMilliseconds(200.0);
     private static readonly TimeSpan EventDeliveryTimeout = TimeSpan.FromSeconds(30.0);
@@ -41,7 +48,11 @@ public sealed class PlantServerTests(PlantServerFixture fixture) : IClassFixture
     public async Task Browse_ShouldFindPlantUnderObjectsFolder()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
-        await using var client = await PlantClient.ConnectAsync(fixture.EndpointUrl, cancellationToken);
+        await using var client = await PlantClient.ConnectAsync(
+            fixture.EndpointUrl,
+            PlantServerFixture.OperatorIdentity,
+            cancellationToken
+        );
 
         var children = await client.BrowseChildrenAsync(ObjectIds.ObjectsFolder, cancellationToken);
 
@@ -52,7 +63,11 @@ public sealed class PlantServerTests(PlantServerFixture fixture) : IClassFixture
     public async Task Read_Temperature_ShouldBeWithinOscillationBandOfSetpoint()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
-        await using var client = await PlantClient.ConnectAsync(fixture.EndpointUrl, cancellationToken);
+        await using var client = await PlantClient.ConnectAsync(
+            fixture.EndpointUrl,
+            PlantServerFixture.OperatorIdentity,
+            cancellationToken
+        );
         const double setpoint = 30.0;
 
         // Writes its own setpoint rather than reading whichever value a
@@ -69,7 +84,11 @@ public sealed class PlantServerTests(PlantServerFixture fixture) : IClassFixture
     public async Task Write_Setpoint_ShouldRoundTrip()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
-        await using var client = await PlantClient.ConnectAsync(fixture.EndpointUrl, cancellationToken);
+        await using var client = await PlantClient.ConnectAsync(
+            fixture.EndpointUrl,
+            PlantServerFixture.OperatorIdentity,
+            cancellationToken
+        );
 
         await client.WriteDoubleAsync("Setpoint", 42.0, cancellationToken);
 
@@ -81,7 +100,11 @@ public sealed class PlantServerTests(PlantServerFixture fixture) : IClassFixture
     public async Task Write_Setpoint_WithValueAboveMaximum_ShouldClamp()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
-        await using var client = await PlantClient.ConnectAsync(fixture.EndpointUrl, cancellationToken);
+        await using var client = await PlantClient.ConnectAsync(
+            fixture.EndpointUrl,
+            PlantServerFixture.OperatorIdentity,
+            cancellationToken
+        );
 
         await client.WriteDoubleAsync("Setpoint", 1000.0, cancellationToken);
 
@@ -93,7 +116,11 @@ public sealed class PlantServerTests(PlantServerFixture fixture) : IClassFixture
     public async Task Call_SetSetpoint_ShouldReturnAcceptedValueAndUpdateVariable()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
-        await using var client = await PlantClient.ConnectAsync(fixture.EndpointUrl, cancellationToken);
+        await using var client = await PlantClient.ConnectAsync(
+            fixture.EndpointUrl,
+            PlantServerFixture.OperatorIdentity,
+            cancellationToken
+        );
 
         var accepted = await client.CallSetSetpointAsync(1000.0, cancellationToken);
 
@@ -106,7 +133,11 @@ public sealed class PlantServerTests(PlantServerFixture fixture) : IClassFixture
     public async Task Subscribe_SetpointChanges_ShouldDeliverOnlyChangesMadeWhileSubscribed()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
-        await using var client = await PlantClient.ConnectAsync(fixture.EndpointUrl, cancellationToken);
+        await using var client = await PlantClient.ConnectAsync(
+            fixture.EndpointUrl,
+            PlantServerFixture.OperatorIdentity,
+            cancellationToken
+        );
         const double unsubscribedSetpoint = 55.0;
         const double subscribedSetpoint = 30.0;
 
@@ -138,6 +169,43 @@ public sealed class PlantServerTests(PlantServerFixture fixture) : IClassFixture
         changes.Current.NewSetpoint.ShouldNotBe(unsubscribedSetpoint);
         // The delivery: a change made while subscribed arrives, with its value.
         changes.Current.NewSetpoint.ShouldBe(subscribedSetpoint);
+    }
+
+    [Fact]
+    public async Task Connect_WithWrongPassword_ShouldFailToActivateTheSession()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var wrongCredentials = new UserIdentity("operator", Encoding.UTF8.GetBytes("wrong-password"));
+
+        await Should.ThrowAsync<ServiceResultException>(async () =>
+            await PlantClient.ConnectAsync(fixture.EndpointUrl, wrongCredentials, cancellationToken)
+        );
+    }
+
+    [Fact]
+    public async Task Connect_WithAnUnknownUserName_ShouldFailToActivateTheSession()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var unknownUser = new UserIdentity("nobody", Encoding.UTF8.GetBytes("some-password"));
+
+        await Should.ThrowAsync<ServiceResultException>(async () =>
+            await PlantClient.ConnectAsync(fixture.EndpointUrl, unknownUser, cancellationToken)
+        );
+    }
+
+    [Fact]
+    public async Task Connect_WithObserverCredentials_ShouldActivateTheSession()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+
+        await using var client = await PlantClient.ConnectAsync(
+            fixture.EndpointUrl,
+            PlantServerFixture.ObserverIdentity,
+            cancellationToken
+        );
+
+        var setpoint = await client.ReadDoubleAsync("Setpoint", cancellationToken);
+        setpoint.ShouldBeInRange(PlantSimulationMinimum, PlantSimulationMaximum);
     }
 
     /// <summary>
