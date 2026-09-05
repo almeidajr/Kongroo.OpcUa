@@ -51,10 +51,7 @@ builder
 // Bound eagerly, not through IOptions: the user store is a constructor argument to services
 // registered below, so it has to exist before the provider does. A malformed user throws here,
 // which is what makes a bad configuration a refusal to boot rather than a silent weak account.
-// Named startupPlantOptions, not plantOptions: the pre-existing
-// Configure<IOptions<PlantServerOptions>> lambda further down already binds a parameter called
-// plantOptions, at the wrapper type. One identifier for two different types in one file invites a
-// reader at that lambda to think it is this value.
+// The name keeps it distinct from the IOptions-typed plantOptions bound further down.
 var startupPlantOptions =
     builder.Configuration.GetSection(PlantServerOptions.SectionName).Get<PlantServerOptions>()
     ?? new PlantServerOptions();
@@ -63,8 +60,8 @@ var userDatabase = PlantUsers.CreateUserDatabase(startupPlantOptions.Users);
 var userManagement = new UserManagement(
     userDatabase,
     // Fully qualified: ImplicitUsings is enabled repo-wide, so a bare `Range` is ambiguous
-    // between Opc.Ua.Range and System.Range (CS0104). Argument order is (high, low), verified
-    // by the Task 1 probe: new Opc.Ua.Range(64, 8) yields High=64, Low=8.
+    // between Opc.Ua.Range and System.Range (CS0104). The constructor is (high, low) — the
+    // first argument becomes High — so this is a password length range of 8 to 64.
     new Opc.Ua.Range(64, PlantUsers.MinimumPasswordLength),
     null,
     null

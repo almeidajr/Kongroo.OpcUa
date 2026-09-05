@@ -48,9 +48,14 @@ internal sealed class PlantClient : IAsyncDisposable
     }
 
     /// <summary>
-    /// Discovers the endpoint at <paramref name="endpointUrl"/> and opens an
-    /// anonymous, signed-and-encrypted session on it.
+    /// Discovers the endpoint at <paramref name="endpointUrl"/> and opens a
+    /// signed-and-encrypted session on it, as <paramref name="userIdentity"/> or anonymously.
     /// </summary>
+    /// <remarks>
+    /// The identity is supplied before the first activation, so bad credentials fail the connect
+    /// rather than silently degrading to an anonymous session. See the comment at the session
+    /// factory call for why the stack's convenience wiring is bypassed to get that guarantee.
+    /// </remarks>
     /// <param name="endpointUrl">
     /// The server's <c>opc.tcp</c> URL, used for discovery as well as for the
     /// session.
@@ -66,7 +71,12 @@ internal sealed class PlantClient : IAsyncDisposable
     /// propagates.
     /// </returns>
     /// <exception cref="InvalidOperationException">
-    /// The server does not expose the Plant namespace.
+    /// The server does not expose the Plant namespace, or no discovered endpoint matches the
+    /// required security mode and policy.
+    /// </exception>
+    /// <exception cref="ServiceResultException">
+    /// The server refused the session — most often <c>BadUserAccessDenied</c> because
+    /// <paramref name="userIdentity"/> carries an unknown user or a wrong password.
     /// </exception>
     /// <exception cref="OperationCanceledException">
     /// <paramref name="cancellationToken"/> was signalled while connecting.
@@ -176,12 +186,20 @@ internal sealed class PlantClient : IAsyncDisposable
     /// Reads a Plant variable and returns the service result rather than throwing on a bad status.
     /// </summary>
     /// <param name="browseName">Browse name of the variable under the Plant object.</param>
-    /// <param name="cancellationToken">Cancelled by the test host; ends the read.</param>
+    /// <param name="cancellationToken">
+    /// Cancelled by the test host; the returned task faults with
+    /// <see cref="OperationCanceledException"/> rather than returning a bad status.
+    /// </param>
     /// <returns>
     /// The status the server returned and, when that status is good, the value. A bad status
     /// yields <see cref="double.NaN"/>, so a caller that ignores the status cannot mistake a
     /// denial for a reading.
     /// </returns>
+    /// <exception cref="InvalidOperationException">
+    /// The browse path could not be resolved. This is the shape a denial takes for a session
+    /// lacking <see cref="Opc.Ua.PermissionType.Browse"/> on the node: the read never happens,
+    /// because the node cannot be addressed, so no status is returned to inspect.
+    /// </exception>
     public async Task<(StatusCode Status, double Value)> TryReadDoubleAsync(
         string browseName,
         CancellationToken cancellationToken = default

@@ -77,9 +77,10 @@ internal static class PlantUsers
     /// </summary>
     /// <param name="role">The configured role.</param>
     /// <returns>
-    /// The BrowseName <c>ConfigureRoles</c> matches on. It must equal the name
-    /// <see cref="RoleManager"/> seeded, or the stack creates a new role that grants nothing
-    /// instead of resolving the well-known one.
+    /// The BrowseName the stack's own role registration matches on. It must equal the name
+    /// <see cref="RoleManager"/> seeded in its constructor, or the stack creates a new role that
+    /// grants nothing instead of resolving the well-known one — a failure that presents exactly
+    /// like a permissions bug.
     /// </returns>
     /// <exception cref="ArgumentOutOfRangeException">
     /// <paramref name="role"/> is not a declared <see cref="PlantRole"/>.
@@ -97,14 +98,28 @@ internal static class PlantUsers
         };
 
     /// <summary>
-    /// The single definition of the role-to-user mapping <c>ConfigureRoles</c> needs: one role
-    /// definition per <see cref="PlantRole"/>, holding a <see cref="RoleIdentityMappingOptions"/>
-    /// for every user that holds it. Both <c>Program.cs</c> and
-    /// <c>PlantServerFixture.cs</c> call this so the integration tests cannot drift from what the
-    /// server itself configures.
+    /// Adds one <see cref="RoleDefinitionOptions"/> per <see cref="PlantRole"/> to
+    /// <paramref name="roleOptions"/>, each carrying a <see cref="RoleIdentityMappingOptions"/>
+    /// that matches on user name for every user holding that role.
     /// </summary>
-    /// <param name="roleOptions">The role configuration being built.</param>
+    /// <param name="roleOptions">
+    /// The role configuration being built. Mutated in place; existing entries are left alone.
+    /// </param>
     /// <param name="users">Users to map onto their <see cref="PlantUserOptions.Role"/>.</param>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// A declared <see cref="PlantRole"/> has no BrowseName in <see cref="BrowseNameFor"/> — which
+    /// happens if the enum gains a member and that switch is not updated with it.
+    /// </exception>
+    /// <remarks>
+    /// <para>
+    /// A role with no users still gets a definition, with no identity criteria. That grants
+    /// nobody anything, and it resolves the well-known role rather than leaving it undeclared.
+    /// </para>
+    /// <para>
+    /// This is the single definition of the mapping: both the server host and the integration
+    /// test fixture call it, so the tests cannot validate a role wiring the server does not use.
+    /// </para>
+    /// </remarks>
     internal static void ConfigureRoles(RoleConfigurationOptions roleOptions, IEnumerable<PlantUserOptions> users)
     {
         foreach (var role in Enum.GetValues<PlantRole>())

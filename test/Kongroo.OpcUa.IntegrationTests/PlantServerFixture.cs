@@ -32,19 +32,34 @@ public sealed class PlantServerFixture : IAsyncLifetime
     /// </summary>
     private static readonly TimeSpan StartTimeout = TimeSpan.FromSeconds(60);
 
+    /// <summary>Name of the seeded user granted the Observer role.</summary>
     internal const string ObserverUserName = "observer";
-    private const string ObserverPassword = "observer-password";
+
+    /// <summary>
+    /// Name of the seeded user granted the Operator role. Exposed so a test asserting "existing
+    /// user, wrong password" binds to it: with a literal, renaming the seeded user would leave
+    /// that test passing as a duplicate of the unknown-user one.
+    /// </summary>
     internal const string OperatorUserName = "operator";
+
+    // Test-only credentials. They are literals here and must never reach appsettings.json.
+    private const string ObserverPassword = "observer-password";
     private const string OperatorPassword = "operator-password";
 
     private IHost? _host;
     private string _pkiRoot = string.Empty;
 
-    /// <summary>Identity of a user holding only the well-known Observer role.</summary>
+    /// <summary>
+    /// Credentials for the seeded user holding only the well-known Observer role: it may read and
+    /// receive events, and every write and call it attempts is refused.
+    /// </summary>
     public static UserIdentity ObserverIdentity { get; } =
         new(ObserverUserName, Encoding.UTF8.GetBytes(ObserverPassword));
 
-    /// <summary>Identity of a user holding the well-known Operator role.</summary>
+    /// <summary>
+    /// Credentials for the seeded user holding the well-known Operator role, which holds every
+    /// permission the Plant nodes grant.
+    /// </summary>
     public static UserIdentity OperatorIdentity { get; } =
         new(OperatorUserName, Encoding.UTF8.GetBytes(OperatorPassword));
 

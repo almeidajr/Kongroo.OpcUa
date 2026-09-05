@@ -8,11 +8,16 @@ namespace Kongroo.OpcUa.Server;
 /// weaken the endpoint's security posture.
 /// </summary>
 /// <remarks>
-/// Bound with <c>ValidateDataAnnotations().ValidateOnStart()</c>, so a value
-/// outside its declared range aborts startup instead of falling back to the
-/// default. Validation is declared with data annotations rather than a
-/// hand-written predicate, so a setting added later is validated by the
-/// existing call without touching <c>Program.cs</c>.
+/// <para>
+/// Bound with <c>ValidateDataAnnotations().ValidateOnStart()</c>, so a scalar setting outside its
+/// declared range aborts startup instead of falling back to the default.
+/// </para>
+/// <para>
+/// That covers this type's own properties only. <c>ValidateDataAnnotations</c> does not recurse
+/// into collection items, so <see cref="Users"/> is validated separately by
+/// <see cref="PlantUsers.CreateUserDatabase"/>, which runs before the host is built. A scalar
+/// setting added later is validated by the existing call; a nested one is not.
+/// </para>
 /// </remarks>
 internal sealed record PlantServerOptions
 {
@@ -42,6 +47,11 @@ internal sealed record PlantServerOptions
     /// Empty when configuration supplies none, which is legal: the server boots, only anonymous
     /// sessions can connect, and the Plant is invisible to every one of them.
     /// </value>
+    /// <remarks>
+    /// Get-only so the configuration binder populates it in place; a settable collection property
+    /// would trip CA2227, which is an error here. The list is read once during startup and not
+    /// guarded for concurrent access.
+    /// </remarks>
     public IList<PlantUserOptions> Users { get; } = [];
 }
 
@@ -50,6 +60,11 @@ internal sealed record PlantServerOptions
 /// it exists as a separate enum because <see cref="Opc.Ua.Server.Role"/>
 /// cannot be bound from configuration.
 /// </summary>
+/// <remarks>
+/// These names are what appears in configuration, so an unrecognised value fails at binding
+/// rather than producing a user who authenticates and is then granted nothing.
+/// </remarks>
+/// <seealso cref="PlantAuthorization"/>
 internal enum PlantRole
 {
     /// <summary>Reads <c>Temperature</c> and <c>Setpoint</c>, and receives events.</summary>
@@ -77,6 +92,10 @@ internal sealed record PlantUserOptions
     /// Password in clear text, supplied through user secrets or environment variables.
     /// Never committed to a configuration file. Hashed with PBKDF2-SHA512 on seeding.
     /// </summary>
+    /// <value>
+    /// At least <see cref="PlantUsers.MinimumPasswordLength"/> characters; a shorter or blank
+    /// value stops the host from starting.
+    /// </value>
     public string Password { get; init; } = string.Empty;
 
     /// <summary>Role this user is granted.</summary>

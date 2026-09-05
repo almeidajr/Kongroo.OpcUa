@@ -17,7 +17,12 @@ internal enum PlantNode
     /// <summary>The read/write setpoint variable.</summary>
     Setpoint,
 
-    /// <summary>The <c>SetSetpoint</c> method.</summary>
+    /// <summary>
+    /// The method that applies a requested setpoint and returns the value accepted after
+    /// clamping. Gated by <see cref="PermissionType.Call"/> rather than
+    /// <see cref="PermissionType.Write"/>, so it is a separate row from
+    /// <see cref="Setpoint"/> even though both reach the same state.
+    /// </summary>
     SetSetpoint,
 }
 
@@ -72,6 +77,8 @@ internal static class PlantAuthorization
     /// <returns>
     /// Entries for <see cref="Role.Observer"/> and <see cref="Role.Operator"/>. Never empty — an
     /// empty list would mean "unrestricted" to the stack, which is the opposite of the intent.
+    /// A fresh array each call, so assigning it to a node's attribute shares no state with any
+    /// other node.
     /// </returns>
     internal static RolePermissionType[] RolePermissionsFor(PlantNode node) =>
         [RolePermissionFor(node, Role.Observer), RolePermissionFor(node, Role.Operator)];
