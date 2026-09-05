@@ -78,6 +78,19 @@ public sealed partial class PlantNodeManager
         // last, which is why the source is a long-lived channel rather
         // than per-subscription state.
         builder.Plant.Publish(SetpointChangesAsync);
+
+        // Authorization is declarative: the stack's service dispatcher intersects these against
+        // the session's granted roles before any handler runs, so nothing above changes. Anonymous
+        // is absent from every list, and absence is the denial — OPC UA has no deny bit.
+        // An empty list would mean "unrestricted", so a node omitted here would be public.
+        // The generated properties are nullable because nothing at the type level guarantees a
+        // predefined instance was materialized, but Configure runs after that materialization, so
+        // the null-forgiving operator below reflects a real invariant, not a suppressed warning.
+        var plant = builder.Plant.Builder.As<PlantState>().Node;
+        plant.RolePermissions = PlantAuthorization.RolePermissionsFor(PlantNode.Plant);
+        plant.Temperature!.RolePermissions = PlantAuthorization.RolePermissionsFor(PlantNode.Temperature);
+        plant.Setpoint!.RolePermissions = PlantAuthorization.RolePermissionsFor(PlantNode.Setpoint);
+        plant.SetSetpoint!.RolePermissions = PlantAuthorization.RolePermissionsFor(PlantNode.SetSetpoint);
     }
 
     /// <summary>
