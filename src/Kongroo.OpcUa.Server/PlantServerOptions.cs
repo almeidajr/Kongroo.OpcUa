@@ -8,11 +8,16 @@ namespace Kongroo.OpcUa.Server;
 /// weaken the endpoint's security posture.
 /// </summary>
 /// <remarks>
-/// Bound with <c>ValidateDataAnnotations().ValidateOnStart()</c>, so a value
-/// outside its declared range aborts startup instead of falling back to the
-/// default. Validation is declared with data annotations rather than a
-/// hand-written predicate, so a setting added later is validated by the
-/// existing call without touching <c>Program.cs</c>.
+/// <para>
+/// Bound with <c>ValidateDataAnnotations().ValidateOnStart()</c>, so a scalar setting outside its
+/// declared range aborts startup instead of falling back to the default.
+/// </para>
+/// <para>
+/// That covers this type's own properties only. <c>ValidateDataAnnotations</c> does not recurse
+/// into collection items, so <see cref="Users"/> is validated separately by
+/// <see cref="PlantUsers.CreateUserDatabase"/>, which runs before the host is built. A scalar
+/// setting added later is validated by the existing call; a nested one is not.
+/// </para>
 /// </remarks>
 internal sealed record PlantServerOptions
 {
@@ -36,4 +41,72 @@ internal sealed record PlantServerOptions
     /// </value>
     [Range(MinimumPort, MaximumPort)]
     public int Port { get; init; } = DefaultPort;
+
+    /// <summary>Users seeded into the in-memory store at startup.</summary>
+    /// <value>
+    /// Empty when configuration supplies none, which is legal: the server boots, only anonymous
+    /// sessions can connect, and the Plant is invisible to every one of them.
+    /// </value>
+    /// <remarks>
+    /// Get-only so the configuration binder populates it in place; a settable collection property
+    /// would trip CA2227, which is an error here. The list is read once during startup and not
+    /// guarded for concurrent access.
+    /// </remarks>
+    public IList<PlantUserOptions> Users { get; } = [];
+}
+
+/// <summary>
+/// Role a seeded user is granted. Maps to the well-known Part 18 roles;
+/// it exists as a separate enum because <see cref="Opc.Ua.Server.Role"/>
+/// cannot be bound from configuration.
+/// </summary>
+/// <remarks>
+/// These names are what appears in configuration, so an unrecognised value fails at binding
+/// rather than producing a user who authenticates and is then granted nothing.
+/// </remarks>
+/// <seealso cref="PlantAuthorization"/>
+internal enum PlantRole
+{
+    /// <summary>Reads <c>Temperature</c> and <c>Setpoint</c>, and receives events.</summary>
+    Observer,
+
+    /// <summary>Everything <see cref="Observer"/> may do, plus writing
+    /// <c>Setpoint</c> and calling <c>SetSetpoint</c>.</summary>
+    Operator,
+}
+
+/// <summary>
+/// One user seeded into the in-memory user store at startup.
+/// </summary>
+/// <remarks>
+/// These are validated by <see cref="PlantUsers.CreateUserDatabase"/>, not by data annotations:
+/// <c>ValidateDataAnnotations</c> inspects only the top-level properties of an options object and
+/// does not recurse into collection items, so attributes here would never run.
+/// </remarks>
+internal sealed record PlantUserOptions
+{
+    /// <summary>User name presented in the OPC UA identity token. Never blank.</summary>
+    public string Name { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Password in clear text, supplied through user secrets or environment variables.
+    /// Never committed to a configuration file. Hashed with PBKDF2-SHA512 on seeding.
+    /// </summary>
+    /// <value>
+    /// At least <see cref="PlantUsers.MinimumPasswordLength"/> characters; a shorter or blank
+    /// value stops the host from starting.
+    /// </value>
+    public string Password { get; init; } = string.Empty;
+
+    /// <summary>Role this user is granted.</summary>
+    public PlantRole Role { get; init; }
+
+    /// <summary>Renders the user without its password.</summary>
+    /// <returns>The user name and role. Never the password.</returns>
+    /// <remarks>
+    /// Overridden because a record's synthesized <c>ToString</c> prints every property: a single
+    /// <c>logger.LogDebug("{User}", user)</c> anywhere downstream would otherwise put a clear-text
+    /// password in the logs, and this type is constructed from real credentials.
+    /// </remarks>
+    public override string ToString() => $"{Name} ({Role})";
 }

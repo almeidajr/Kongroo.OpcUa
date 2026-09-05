@@ -4,6 +4,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Opc.Ua;
 using Opc.Ua.Client;
+using Opc.Ua.Client.Discovery;
 // A namespace alias rather than a using directive: the generated model
 // namespace declares its own ObjectIds, which would make every unqualified
 // ObjectIds below ambiguous with Opc.Ua's.
@@ -47,12 +48,21 @@ internal sealed class PlantClient : IAsyncDisposable
     }
 
     /// <summary>
-    /// Discovers the endpoint at <paramref name="endpointUrl"/> and opens an
-    /// anonymous, signed-and-encrypted session on it.
+    /// Discovers the endpoint at <paramref name="endpointUrl"/> and opens a
+    /// signed-and-encrypted session on it, as <paramref name="userIdentity"/> or anonymously.
     /// </summary>
+    /// <remarks>
+    /// The identity is supplied before the first activation, so bad credentials fail the connect
+    /// rather than silently degrading to an anonymous session. See the comment at the session
+    /// factory call for why the stack's convenience wiring is bypassed to get that guarantee.
+    /// </remarks>
     /// <param name="endpointUrl">
     /// The server's <c>opc.tcp</c> URL, used for discovery as well as for the
     /// session.
+    /// </param>
+    /// <param name="userIdentity">
+    /// Credentials to activate the session with, or <see langword="null"/> to connect
+    /// anonymously.
     /// </param>
     /// <param name="cancellationToken">Abandons the connection attempt.</param>
     /// <returns>
@@ -61,25 +71,49 @@ internal sealed class PlantClient : IAsyncDisposable
     /// propagates.
     /// </returns>
     /// <exception cref="InvalidOperationException">
-    /// The server does not expose the Plant namespace.
+    /// The server does not expose the Plant namespace, or no discovered endpoint matches the
+    /// required security mode and policy.
+    /// </exception>
+    /// <exception cref="ServiceResultException">
+    /// The server refused the session — most often <c>BadUserAccessDenied</c> because
+    /// <paramref name="userIdentity"/> carries an unknown user or a wrong password.
     /// </exception>
     /// <exception cref="OperationCanceledException">
     /// <paramref name="cancellationToken"/> was signalled while connecting.
     /// </exception>
     public static async Task<PlantClient> ConnectAsync(
         string endpointUrl,
+        UserIdentity? userIdentity = null,
         CancellationToken cancellationToken = default
     )
     {
         var pkiRoot = TestPkiRoot.Create();
-        var host = BuildHost(endpointUrl, pkiRoot);
+        var host = BuildHost(pkiRoot);
 
         try
         {
             await host.StartAsync(cancellationToken);
 
-            var connect = host.Services.GetRequiredService<Func<CancellationToken, Task<ManagedSession>>>();
-            var session = await connect(cancellationToken);
+            // Not the DI-registered discovery-and-connect Func: that factory always creates the
+            // session anonymously and applies a supplied identity only as a best-effort,
+            // fire-and-forget update afterwards (IClientIdentityProvider exists to refresh a
+            // long-lived identity on an already-connected session, not to gate the first
+            // activation) — a wrong password would silently fall back to an anonymous session
+            // instead of failing to connect. Resolving the endpoint and calling the session
+            // factory directly lets WithUserIdentity supply the identity eagerly, so a bad
+            // credential fails the very first activation.
+            var discovery = host.Services.GetRequiredService<IOpcUaDiscoveryService>();
+            var factory = host.Services.GetRequiredService<IManagedSessionFactory>();
+            var endpoints = await discovery.GetEndpointsAsync(endpointUrl, ct: cancellationToken);
+            var configuredEndpoint = new ConfiguredEndpoint(null, SelectEndpoint(endpoints), null);
+
+            var session = userIdentity is null
+                ? await factory.ConnectAsync(configuredEndpoint, cancellationToken)
+                : await factory.ConnectAsync(
+                    configuredEndpoint,
+                    sessionBuilder => sessionBuilder.WithUserIdentity(userIdentity),
+                    cancellationToken
+                );
 
             return new PlantClient(host, session, pkiRoot, ResolvePlantNamespaceIndex(session));
         }
@@ -146,6 +180,41 @@ internal sealed class PlantClient : IAsyncDisposable
         var nodeId = await ResolvePlantChildAsync(browseName, cancellationToken);
 
         return await _session.ReadValueAsync<double>(nodeId, cancellationToken);
+    }
+
+    /// <summary>
+    /// Reads a Plant variable and returns the service result rather than throwing on a bad status.
+    /// </summary>
+    /// <param name="browseName">Browse name of the variable under the Plant object.</param>
+    /// <param name="cancellationToken">
+    /// Cancelled by the test host; the returned task faults with
+    /// <see cref="OperationCanceledException"/> rather than returning a bad status.
+    /// </param>
+    /// <returns>
+    /// The status the server returned and, when that status is good, the value. A bad status
+    /// yields <see cref="double.NaN"/>, so a caller that ignores the status cannot mistake a
+    /// denial for a reading.
+    /// </returns>
+    /// <exception cref="InvalidOperationException">
+    /// The browse path could not be resolved. This is the shape a denial takes for a session
+    /// lacking <see cref="Opc.Ua.PermissionType.Browse"/> on the node: the read never happens,
+    /// because the node cannot be addressed, so no status is returned to inspect.
+    /// </exception>
+    public async Task<(StatusCode Status, double Value)> TryReadDoubleAsync(
+        string browseName,
+        CancellationToken cancellationToken = default
+    )
+    {
+        var nodeId = await ResolvePlantChildAsync(browseName, cancellationToken);
+
+        ArrayOf<ReadValueId> nodesToRead = [new ReadValueId { NodeId = nodeId, AttributeId = Attributes.Value }];
+
+        var response = await _session.ReadAsync(null, 0, TimestampsToReturn.Neither, nodesToRead, cancellationToken);
+        var result = response.Results[0];
+
+        return StatusCode.IsGood(result.StatusCode) && result.WrappedValue.TryGetValue(out double value)
+            ? (result.StatusCode, value)
+            : (result.StatusCode, double.NaN);
     }
 
     /// <summary>
@@ -296,7 +365,7 @@ internal sealed class PlantClient : IAsyncDisposable
         TestPkiRoot.Delete(_pkiRoot);
     }
 
-    private static IHost BuildHost(string endpointUrl, string pkiRoot)
+    private static IHost BuildHost(string pkiRoot)
     {
         var builder = Host.CreateApplicationBuilder();
         builder.Logging.SetMinimumLevel(LogLevel.Warning);
@@ -315,12 +384,9 @@ internal sealed class PlantClient : IAsyncDisposable
                 options.AutoAcceptUntrustedCertificates = true;
                 options.Session = new ManagedSessionOptions { SessionName = "KongrooOpcUaTestClient" };
             })
-            .AddDiscoveryAndConnect(options =>
-            {
-                options.DiscoveryUrl = endpointUrl;
-                options.SecurityMode = MessageSecurityMode.SignAndEncrypt;
-                options.SecurityPolicyUri = SecurityPolicies.Basic256Sha256;
-            })
+            // Registers IOpcUaDiscoveryService; endpoint selection and the session connect
+            // itself are done in ConnectAsync so a per-connect identity can be supplied eagerly.
+            .AddDiscovery()
             // Registers the v2 subscription manager that ManagedSession's
             // DefaultStreaming needs; without it the property throws. The
             // publishing interval bounds how long an event waits for its
@@ -333,6 +399,32 @@ internal sealed class PlantClient : IAsyncDisposable
             });
 
         return builder.Build();
+    }
+
+    /// <summary>
+    /// Picks the endpoint matching this client's security requirements from a discovery
+    /// response. Mirrors the private filtering the stack's own discovery-and-connect wiring
+    /// applies internally; <see cref="ConnectAsync"/> does not use that wiring directly, per the
+    /// comment at its call site.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately omits the original's optional TransportProfileUri clause: that field is unset
+    /// on both sides here, so the filter is inert. Restore it if either side ever sets one.
+    /// </remarks>
+    private static EndpointDescription SelectEndpoint(ArrayOf<EndpointDescription> endpoints)
+    {
+        foreach (var endpoint in endpoints)
+        {
+            if (
+                endpoint.SecurityMode == MessageSecurityMode.SignAndEncrypt
+                && string.Equals(endpoint.SecurityPolicyUri, SecurityPolicies.Basic256Sha256, StringComparison.Ordinal)
+            )
+            {
+                return endpoint;
+            }
+        }
+
+        throw new InvalidOperationException("No discovered endpoint matched the configured security policy and mode.");
     }
 
     private static ushort ResolvePlantNamespaceIndex(ManagedSession session)

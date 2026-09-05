@@ -94,6 +94,40 @@ Everything below is enforced; ignoring it means a red build or red CI, not a sty
   invokes those right after the listeners open, which is a real readiness signal rather than a
   guessed delay or a retry loop. `test/Kongroo.OpcUa.IntegrationTests/PlantServerFixture.cs` is the
   working example.
+- **`AddDefaultIdentityAuthenticators` skips the username authenticator in silence** when either
+  `IUserDatabase` or `IUserManagement` is missing — no log, no throw. Combined with a `UserName`
+  token policy, that is a server advertising password login and rejecting every password. Both are
+  registered unconditionally in `Program.cs`, empty user list included, so the path is unreachable.
+- **That factory _does_ receive an `IServiceProvider`**, unlike `AddServer`'s callback. The user
+  store comes from plain DI registration; it needs none of the `Configure<IOptions<…>>` indirection
+  the port setting uses.
+- **`ConfigureRoles` alone registers the role manager.** `AddRoleManager` exists only for supplying
+  a custom `IRoleManager`, and there is no zero-argument overload. `RoleManager`'s constructor seeds
+  every well-known role and `ConfigureRoles` matches them by BrowseName, so
+  `Name = BrowseNames.WellKnownRole_Observer` resolves to the standard NodeId instead of creating a
+  new role.
+- **`ValidateDataAnnotations` does not recurse into collection items.** Attributes on
+  `PlantUserOptions` would never run, so user validation lives in `PlantUsers.CreateUserDatabase`,
+  which is called before `builder.Build()`. Do not "restore" the attributes believing they validate.
+- **Node permissions fail open.** `MasterNodeManager.ValidateRolePermissions` returns `Good` when a
+  node's `RolePermissions` is empty, so a Plant node missing from `PlantAuthorization` is silently
+  public. Anything added to `Model/Plant.xml` needs a `PlantNode` entry and a matrix row.
+- **`Range` must be written `Opc.Ua.Range`.** `ImplicitUsings` is on repo-wide and both `Program.cs`
+  and `PlantServerFixture.cs` have `using Opc.Ua;`, so a bare `Range` is CS0104 against
+  `System.Range`. Its constructor is `(high, low)` — the first argument becomes `High`.
+- **Putting `RolePermissions` on an event source node kills event delivery for _every_ role on
+  `2.0.0-preview.3`.** The constructor `OperationContext(IMonitoredItem)`, `OperationContext.cs:147`
+  in the `D:\gsc\UA-.NETStandard` reference checkout — which tracks `master`, ahead of the
+  `2.0.0-preview.3` package this repo runs, so the line number is a `master` reference — sets
+  `UserIdentity = monitoredItem.EffectiveIdentity` and then overwrites it with
+  `UserIdentity = Session.Identity` whenever a session exists. `SessionManager` puts the
+  role-bearing `RoleBasedIdentity` only into the _effective_ identity, so the per-event
+  `ReceiveEvents` check sees no granted roles and drops every event. Read, Write, Call and Browse
+  are unaffected — they use the service-request context, which carries the effective identity.
+  This is why `Subscribe_SetpointChanges_ShouldDeliverOnlyChangesMadeWhileSubscribed` is
+  `[Fact(Skip = …)]`: the test is correct and will pass unchanged once the stack is fixed. Do not
+  "fix" it by removing the Plant object's permissions — that would let an anonymous session
+  subscribe to setpoint changes.
 
 ## Layout
 
@@ -141,7 +175,10 @@ here; this section records only what is specific to this repo.
   first — it was trimmed out, nothing uses it yet.
 - **The `building-opcua-servers` skill's worked examples use `ct`, `s`, `v` in lambdas and `m_` on
   fields.** Follow the skill's shape, not its identifiers: `.editorconfig` enforces `_camelCase`
-  private fields (IDE1006 + warnings-as-errors), so `m_state` **does not compile** here.
+  private fields (IDE1006 + warnings-as-errors), so `m_state` **does not compile** here. The
+  skill's worked example also names its own record `PlantState`, which is exactly the class the
+  generator emits for `PlantType` in this repo (see the `Build conventions` bullet above) — that
+  collision is why the simulation record here is `PlantSimulationState` instead.
 
 ## Documentation and comments
 

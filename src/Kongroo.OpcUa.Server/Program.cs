@@ -3,6 +3,8 @@ using Kongroo.OpcUa.Server;
 using Microsoft.Extensions.Options;
 using Opc.Ua;
 using Opc.Ua.Server.Hosting;
+using Opc.Ua.Server.UserDatabase;
+using Opc.Ua.Server.UserManagement;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
@@ -46,6 +48,32 @@ builder
     .ValidateDataAnnotations()
     .ValidateOnStart();
 
+// Bound eagerly, not through IOptions: the user store is a constructor argument to services
+// registered below, so it has to exist before the provider does. A malformed user throws here,
+// which is what makes a bad configuration a refusal to boot rather than a silent weak account.
+// The name keeps it distinct from the IOptions-typed plantOptions bound further down.
+var startupPlantOptions =
+    builder.Configuration.GetSection(PlantServerOptions.SectionName).Get<PlantServerOptions>()
+    ?? new PlantServerOptions();
+
+var userDatabase = PlantUsers.CreateUserDatabase(startupPlantOptions.Users);
+var userManagement = new UserManagement(
+    userDatabase,
+    // Fully qualified: ImplicitUsings is enabled repo-wide, so a bare `Range` is ambiguous
+    // between Opc.Ua.Range and System.Range (CS0104). The constructor is (high, low) — the
+    // first argument becomes High — so this is a password length range of 8 to 64.
+    new Opc.Ua.Range(64, PlantUsers.MinimumPasswordLength),
+    null,
+    null
+);
+
+// Registered even when no users are configured. The stack's default-authenticator factory skips
+// UserNamePasswordAuthenticator in silence when either service is missing, which would leave the
+// endpoint advertising password login and rejecting every password with nothing in the log.
+// Registering unconditionally makes that path unreachable; an empty store simply has no accounts.
+builder.Services.AddSingleton<IUserDatabase>(userDatabase);
+builder.Services.AddSingleton<IUserManagement>(userManagement);
+
 builder
     .Services.AddOpcUa()
     .AddServer(options =>
@@ -62,6 +90,7 @@ builder
         options.IncludeSignAndEncryptPolicies = true;
         options.IncludeUnsecurePolicyNone = false;
         options.UserTokenPolicies.Add(new OpcUaUserTokenPolicy { TokenType = UserTokenType.Anonymous });
+        options.UserTokenPolicies.Add(new OpcUaUserTokenPolicy { TokenType = UserTokenType.UserName });
         // Not the stack's default %TEMP%/OPC Foundation/{App}/pki: %TEMP% is
         // routinely cleared, and a server that loses its certificate store
         // regenerates its identity on the next boot, forcing every client to
@@ -78,10 +107,15 @@ builder
         // AddServer does NOT auto-wire identity options; without this call
         // authentication is silently absent.
         options.EnableAnonymous = true;
-        options.EnableUserNamePassword = false;
+        options.EnableUserNamePassword = true;
         options.EnableX509 = false;
         options.EnableJwt = false;
     })
+    // ConfigureRoles alone registers the role manager; AddRoleManager is only for supplying a
+    // custom IRoleManager. RoleManager's constructor already seeds every well-known role, and
+    // roles are matched by BrowseName, so these resolve to the standard Part 18 NodeIds rather
+    // than creating new ones.
+    .ConfigureRoles(roleOptions => PlantUsers.ConfigureRoles(roleOptions, startupPlantOptions.Users))
     .AddNodeManager<PlantNodeManagerFactory>();
 
 // AddServer's callback is an Action<OpcUaServerOptions> with no access to DI,

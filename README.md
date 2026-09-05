@@ -35,6 +35,23 @@ dotnet new kongroo-itest   -n Kongroo.OpcUa.IntegrationTests -o test/Kongroo.Opc
 # then: dotnet sln add <path passed to -o above>/<ProjectName>.csproj
 ```
 
+## Adding an OPC UA user
+
+`Kongroo.OpcUa.Server` ships with `"OpcUa:Users": []`, so with no users configured the server still
+starts, but the Plant is invisible to every session — anonymous holds no permissions, so an empty
+user list looks like a broken server but is the designed behaviour. Passwords are never committed
+to a configuration file; supply them through user secrets (or environment variables) instead:
+
+```bash
+cd src/Kongroo.OpcUa.Server
+dotnet user-secrets set "OpcUa:Users:0:Name" "operator"
+dotnet user-secrets set "OpcUa:Users:0:Password" "a-password-of-at-least-8-characters"
+dotnet user-secrets set "OpcUa:Users:0:Role" "Operator"
+```
+
+`Role` is `Operator` or `Observer`. The password minimum is `PlantUsers.MinimumPasswordLength` (8
+characters).
+
 ## Package versions
 
 `Directory.Packages.props` is the single source of every package version — Central Package

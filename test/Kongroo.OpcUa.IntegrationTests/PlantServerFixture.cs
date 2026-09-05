@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
+using System.Text;
 using Kongroo.OpcUa.Server;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -7,6 +8,8 @@ using Microsoft.Extensions.Logging;
 using Opc.Ua;
 using Opc.Ua.Server;
 using Opc.Ua.Server.Hosting;
+using Opc.Ua.Server.UserDatabase;
+using Opc.Ua.Server.UserManagement;
 
 namespace Kongroo.OpcUa.IntegrationTests;
 
@@ -29,8 +32,36 @@ public sealed class PlantServerFixture : IAsyncLifetime
     /// </summary>
     private static readonly TimeSpan StartTimeout = TimeSpan.FromSeconds(60);
 
+    /// <summary>Name of the seeded user granted the Observer role.</summary>
+    internal const string ObserverUserName = "observer";
+
+    /// <summary>
+    /// Name of the seeded user granted the Operator role. Exposed so a test asserting "existing
+    /// user, wrong password" binds to it: with a literal, renaming the seeded user would leave
+    /// that test passing as a duplicate of the unknown-user one.
+    /// </summary>
+    internal const string OperatorUserName = "operator";
+
+    // Test-only credentials. They are literals here and must never reach appsettings.json.
+    private const string ObserverPassword = "observer-password";
+    private const string OperatorPassword = "operator-password";
+
     private IHost? _host;
     private string _pkiRoot = string.Empty;
+
+    /// <summary>
+    /// Credentials for the seeded user holding only the well-known Observer role: it may read and
+    /// receive events, and every write and call it attempts is refused.
+    /// </summary>
+    public static UserIdentity ObserverIdentity { get; } =
+        new(ObserverUserName, Encoding.UTF8.GetBytes(ObserverPassword));
+
+    /// <summary>
+    /// Credentials for the seeded user holding the well-known Operator role, which holds every
+    /// permission the Plant nodes grant.
+    /// </summary>
+    public static UserIdentity OperatorIdentity { get; } =
+        new(OperatorUserName, Encoding.UTF8.GetBytes(OperatorPassword));
 
     /// <summary>
     /// The <c>opc.tcp</c> endpoint the in-process server listens on.
@@ -67,6 +98,34 @@ public sealed class PlantServerFixture : IAsyncLifetime
         builder.Logging.SetMinimumLevel(LogLevel.Warning);
         builder.Services.AddSingleton<IServerStartupTask>(readySignal);
 
+        var seededUsers = new PlantUserOptions[]
+        {
+            new()
+            {
+                Name = ObserverUserName,
+                Password = ObserverPassword,
+                Role = PlantRole.Observer,
+            },
+            new()
+            {
+                Name = OperatorUserName,
+                Password = OperatorPassword,
+                Role = PlantRole.Operator,
+            },
+        };
+
+        var userDatabase = PlantUsers.CreateUserDatabase(seededUsers);
+        var userManagement = new UserManagement(
+            userDatabase,
+            // Fully qualified for the same CS0104 reason as Program.cs: ImplicitUsings is on and
+            // this file already has `using Opc.Ua;`. Order is (high, low).
+            new Opc.Ua.Range(64, PlantUsers.MinimumPasswordLength),
+            null,
+            null
+        );
+        builder.Services.AddSingleton<IUserDatabase>(userDatabase);
+        builder.Services.AddSingleton<IUserManagement>(userManagement);
+
         builder
             .Services.AddOpcUa()
             .AddServer(options =>
@@ -80,15 +139,20 @@ public sealed class PlantServerFixture : IAsyncLifetime
                 // without an out-of-band trust step.
                 options.AutoAcceptUntrustedCertificates = true;
                 options.UserTokenPolicies.Add(new OpcUaUserTokenPolicy { TokenType = UserTokenType.Anonymous });
+                options.UserTokenPolicies.Add(new OpcUaUserTokenPolicy { TokenType = UserTokenType.UserName });
                 options.EndpointUrls.Add(EndpointUrl);
             })
             .AddDefaultIdentityAuthenticators(options =>
             {
                 options.EnableAnonymous = true;
-                options.EnableUserNamePassword = false;
+                options.EnableUserNamePassword = true;
                 options.EnableX509 = false;
                 options.EnableJwt = false;
             })
+            // ConfigureRoles alone registers the role manager; AddRoleManager is only for
+            // supplying a custom IRoleManager. Mirrors Program.cs, reading from the users seeded
+            // above instead of configuration.
+            .ConfigureRoles(roleOptions => PlantUsers.ConfigureRoles(roleOptions, seededUsers))
             .AddNodeManager<PlantNodeManagerFactory>();
 
         _host = builder.Build();
