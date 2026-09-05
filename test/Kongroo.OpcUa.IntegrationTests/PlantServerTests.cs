@@ -175,7 +175,10 @@ public sealed class PlantServerTests(PlantServerFixture fixture) : IClassFixture
     public async Task Connect_WithWrongPassword_ShouldFailToActivateTheSession()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
-        var wrongCredentials = new UserIdentity("operator", Encoding.UTF8.GetBytes("wrong-password"));
+        var wrongCredentials = new UserIdentity(
+            PlantServerFixture.OperatorUserName,
+            Encoding.UTF8.GetBytes("wrong-password")
+        );
 
         await Should.ThrowAsync<ServiceResultException>(async () =>
             await PlantClient.ConnectAsync(fixture.EndpointUrl, wrongCredentials, cancellationToken)

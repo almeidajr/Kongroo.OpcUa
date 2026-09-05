@@ -389,6 +389,10 @@ internal sealed class PlantClient : IAsyncDisposable
     /// applies internally; <see cref="ConnectAsync"/> does not use that wiring directly, per the
     /// comment at its call site.
     /// </summary>
+    /// <remarks>
+    /// Deliberately omits the original's optional TransportProfileUri clause: that field is unset
+    /// on both sides here, so the filter is inert. Restore it if either side ever sets one.
+    /// </remarks>
     private static EndpointDescription SelectEndpoint(ArrayOf<EndpointDescription> endpoints)
     {
         foreach (var endpoint in endpoints)

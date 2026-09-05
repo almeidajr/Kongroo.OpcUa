@@ -32,9 +32,9 @@ public sealed class PlantServerFixture : IAsyncLifetime
     /// </summary>
     private static readonly TimeSpan StartTimeout = TimeSpan.FromSeconds(60);
 
-    private const string ObserverUserName = "observer";
+    internal const string ObserverUserName = "observer";
     private const string ObserverPassword = "observer-password";
-    private const string OperatorUserName = "operator";
+    internal const string OperatorUserName = "operator";
     private const string OperatorPassword = "operator-password";
 
     private IHost? _host;
